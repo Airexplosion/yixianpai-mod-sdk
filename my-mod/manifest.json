@@ -1,0 +1,11 @@
+{
+  "id": "com.example.mymod",
+  "name": "我的 Mod",
+  "version": "0.1.0",
+  "author": "你的名字",
+  "description": "从这里开始写你自己的 mod。",
+  "sdkVersion": ">=1.0.0 <2.0.0",
+  "entry": "plugins/MyMod.dll",
+  "entryType": "MyMod.ModMain",
+  "provides": { "hotkeys": ["F9"] }
+}

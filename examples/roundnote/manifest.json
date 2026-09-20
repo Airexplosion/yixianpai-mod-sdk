@@ -1,0 +1,11 @@
+{
+  "id": "com.yx.roundnote",
+  "name": "回合小记（教学示例）",
+  "version": "1.0.0",
+  "author": "yxp",
+  "description": "记下打了多少回合、多少场斗法，按 F7 看一眼。教学用：配置、热键、事件、存档、钩子组、UiKit 面板、TestHost 测试各走一遍。",
+  "sdkVersion": ">=1.0.0 <2.0.0",
+  "entry": "plugins/RoundNote.dll",
+  "entryType": "YxRoundNote.RoundNoteMod",
+  "provides": { "hooks": ["BattleCharacter.OnTurnStarted"], "hotkeys": ["F7"] }
+}

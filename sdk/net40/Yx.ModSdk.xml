@@ -1,0 +1,734 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Yx.ModSdk</name>
+    </assembly>
+    <members>
+        <member name="T:Yx.Shared.HookDispatchRefs">
+            <summary>
+            重写器需要的分发方法引用。ObjectType / ObjectArrayType 从 Prefix 的参数类型上取，
+            不依赖 ModuleDefinition.TypeSystem / ImportReference（游戏的 IL2CPP 构建把这些 Cecil 写入 API 裁掉了）。
+            </summary>
+        </member>
+        <member name="M:Yx.Shared.HookDispatchRefs.Create(ILRuntime.Mono.Cecil.MethodReference,ILRuntime.Mono.Cecil.MethodReference,ILRuntime.Mono.Cecil.MethodReference)">
+            <summary>prefix 的签名必须是 (int, object, object[])。</summary>
+        </member>
+        <member name="T:Yx.Shared.CecilArrays">
+            <summary>
+            裁剪后的 Cecil Collection&lt;T&gt; 在引用程序集里没有索引器（Il2CppDumper 把它渲染成名为 Item 的属性），
+            统一用 Count + CopyTo 拍成数组再按下标访问。
+            </summary>
+        </member>
+        <member name="T:Yx.Shared.IlEmit">
+            <summary>
+            指令工厂：游戏的 IL2CPP 构建裁掉了 Instruction.Create、OpCode/Operand 的 setter 与 ILProcessor，
+            只剩 internal 构造函数 Instruction(int, OpCode) 和 opcode/operand 字段；标准 Mono.Cecil 的字段名相同，
+            所以单测与运行时走同一条反射路径。
+            </summary>
+        </member>
+        <member name="T:Yx.Shared.IlRewriter">
+            <summary>
+            给一个方法体插入钩子分发调用（见 spec §5）。只依赖 Cecil 的对象模型（Collection.Insert、字段），不依赖偏移；
+            短跳转全部改长跳转，避免插入指令后 .s 形式越界。
+            </summary>
+        </member>
+        <member name="T:Yx.Shared.SaturateRefs">
+            <summary>饱和算术改写要 call 的那几个方法（SatMath 的 MethodDefinition，跨模块直接当操作数用）。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateRefs.Div">
+            <summary>可选：有符号 int 除法（把真值带过去）。null = 不改写 div。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateRefs.Neg">
+            <summary>可选：有符号 int 取负。null = 不改写 neg。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateRefs.ToSingle">
+            <summary>可选：int → float / double 时把真值带过去。null = 不改写 conv.r4 / conv.r8。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateRefs.MathfTypeName">
+            <summary>要替换其 FloorToInt / CeilToInt / RoundToInt(float) 的类型全名。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateResult.Rewritten">
+            <summary>改写了几处。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateResult.Skipped">
+            <summary>放弃改写的原因；null = 分析通过（改写处数可以是 0）。放弃时方法体原样不动。</summary>
+        </member>
+        <member name="T:Yx.Shared.SaturateRewriter">
+             <summary>
+             把一个方法体里的 32 位有符号整数加 / 减 / 乘、「浮点 / 64 位 → int」的转换、Mathf 的三个取整函数，
+             改写成到顶就停的版本（见 docs/superpowers/specs/2026-09-19-saturating-arithmetic-design.md）。
+            
+             先对方法体做一遍栈类型分析（工作表算法，沿顺序流 / 分支 / switch / 异常处理块入口传播，合流处类别不同就降成 Other），
+             只有【确定】两个操作数都是 System.Int32 才改——宁可漏改，不可错改。遇到不认识的指令、栈下溢、合流处栈深不一致、
+             找不到分支目标，整个方法放弃、原样不动。改写是原地换 opcode / operand（栈形状不变，分支目标不受影响），
+             只有 conv.i4(浮点) 要多插一条指令。天然幂等：改写过的地方已经不是 add / conv.i4 了。
+            
+             与 IlRewriter 同样的约束：游戏的 IL2CPP 构建裁掉了 Cecil 的写入 API，只用 IlEmit、Collection.Insert、CecilArrays.Snapshot；
+             每条指令的出栈 / 入栈数用自带的表，不依赖 OpCode.StackBehaviourPop / Push。
+             </summary>
+        </member>
+        <member name="M:Yx.Shared.SaturateRewriter.StateMachineMoveNext(ILRuntime.Mono.Cecil.MethodDefinition)">
+            <summary>async / 迭代器方法的逻辑在它的状态机里：返回那个 MoveNext；不是这种方法返回 null。</summary>
+        </member>
+        <member name="M:Yx.Shared.SaturateRewriter.MethodsOf(ILRuntime.Mono.Cecil.TypeDefinition)">
+            <summary>一个类型自己声明的全部有方法体的方法，含嵌套类型（状态机、闭包类）里的。</summary>
+        </member>
+        <member name="M:Yx.Shared.SaturateRewriter.ResolveGeneric(ILRuntime.Mono.Cecil.TypeReference,ILRuntime.Mono.Cecil.TypeReference,ILRuntime.Mono.Cecil.MethodReference)">
+            <summary>
+            泛型实例上的成员：List&lt;int&gt;.get_Item 的返回类型在 IL 里是泛型参数 T（!0），要对着声明类型 / 方法的泛型实参换成 int。
+            游戏的数值几乎都经过 List&lt;int&gt;（牌的参数）和 Dictionary&lt;int, int&gt;（buff），不解析的话这些运算全都认不出来
+            （0.11–0.12 实机：剑意照样溢出）。换不出来（实参本身还是泛型参数）就原样返回，KindOf 会当成 Other。
+            </summary>
+        </member>
+        <member name="M:Yx.Shared.SaturateRewriter.Pass.Transfer(ILRuntime.Mono.Cecil.Cil.Instruction)">
+            <summary>算出这条指令执行后的栈（写在 _stack / _depth 里），并把分支目标入队。返回是否会落到下一条。</summary>
+        </member>
+        <member name="T:Yx.Shared.ConstRewriter">
+             <summary>
+             把方法体里装载某个整数常量的指令改成「装载常量 → 装载槽号 → call ConstOverrides.Get(int, int)」，
+             让这个常量可以在运行时覆盖（槽关着时 Get 原样返回，行为不变）。
+            
+             用在钩子够不着的地方：async 方法里的局部常量（编译后是状态机的字段，比如战斗主循环的回合上限）、
+             方法中间的魔法数字（比如攻击段数的上限）。为了不误伤同一个方法里数值相同的别的常量，可以给一个字段名提示：
+             只改「紧挨着读 / 写名字里含这个提示的字段」的那几处（`ldfld X; ldc N` 的比较，`ldc N; stfld X` 的赋值）。
+             约束同 IlRewriter：只用 Cecil 的对象模型（IlEmit、Collection.Insert、CecilArrays.Snapshot）。
+             </summary>
+        </member>
+        <member name="M:Yx.Shared.ConstRewriter.Apply(ILRuntime.Mono.Cecil.MethodDefinition,System.Int32,System.String,System.Int32,ILRuntime.Mono.Cecil.MethodReference)">
+            <returns>改了几处。已经改过的不会再改。</returns>
+        </member>
+        <member name="M:Yx.Shared.ConstRewriter.TouchesField(ILRuntime.Mono.Cecil.Cil.Instruction[],System.Int32,System.String)">
+            <summary>前一条是读这个字段（比较），或者后一条是写这个字段（赋值）。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.SceneDetector">
+            <summary>
+            Scene detection keyed on the game's own SceneLoader.currentSceneName ("Home" / "Lobby" / "Battle"),
+            which is what the hot-update code itself checks (BattlePanel.OnTabClick, CardItem, BgmManager...).
+            BattleManager.Instance is set in OnInit and nulled in OnDestroy of the Battle scene object.
+            </summary>
+            <remarks>
+            中文：场景与对局基本信息的只读查询（主线程）。这些方法不抛异常，出错时返回各自的「不知道」值。
+            宿主每 0.5 秒用 <see cref="M:Yx.ModSdk.Unity.SceneDetector.Detect"/> 轮询一次来驱动 <c>OnSceneChanged</c>；mod 想立刻知道当前场景时可以自己调。实机：PASS（03e 组 1、冒烟 S16）。
+            </remarks>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.SceneDetector.Detect">
+            <summary>
+            识别当前场景：游戏场景名为 Lobby / Home 时直接对应；为 Battle 时按 BattleManager.currentScene 分成
+            <see cref="F:Yx.ModSdk.GameScene.Battle"/>（斗法阶段）和 <see cref="F:Yx.ModSdk.GameScene.Placement"/>（其余，即修炼阶段）。
+            </summary>
+            <returns>
+            当前场景；场景加载中、对局场景里还没有 BattleManager / 对局状态、正在选角色、或读取出错时返回 <see cref="F:Yx.ModSdk.GameScene.Unknown"/>。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.SceneDetector.Round">
+            <summary>当前回合号（和 <c>StateApi.Round()</c> 同源，只是用 -1 表示没有）。</summary>
+            <returns>回合号；不在对局场景、还没有对局状态或读取出错时返回 -1。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.SceneDetector.Mode">
+            <summary>(int)GameMode of the current match, -1 outside a match. Cast, never ToString() the enum.</summary>
+            <returns>当前对局的游戏模式（游戏 GameMode 枚举的数值）；不在对局中或读取出错时返回 -1。已知回放中也可能是 -1（03e V01j）。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.SceneDetector.IsObserver">
+            <summary>True when the local player is only watching (spectate / judge / replay).</summary>
+            <returns>
+            true = 本机玩家只是旁观（观战 / 实时观战 / 裁判 / 回放，或对局状态里自己不是玩家）；
+            false = 自己在打，或者不在对局里（没有 BattleManager）、读取出错。做自动操作前先用它挡一下。
+            </returns>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.Ui">
+            <summary>界面工具（仅主线程）。实现取自已验证的 YiXianHud 描边文本写法。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.UiButton">
+            <summary>一个可点的文字按钮（纯色底 + 文字）。由 <see cref="M:Yx.ModSdk.Unity.UiKit.TextButton(UnityEngine.Transform,System.String,System.String,UnityEngine.Vector2,UnityEngine.Vector2,System.Action)"/> 创建。只在主线程用。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Unity.UiButton.IsAlive">
+            <summary>按钮的物体还在（父面板被销毁后为 false，之后的调用都是空操作）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Unity.UiButton.GameObject">
+            <summary>按钮自己的物体（要挪位置、改颜色时用）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiButton.SetText(System.String)">
+            <summary>改按钮上的字。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiButton.SetInteractable(System.Boolean)">
+            <summary>能不能点（不能点时 Unity 会把它画暗）。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.UiInput">
+            <summary>一个输入框。由 <see cref="M:Yx.ModSdk.Unity.UiKit.NumberInput(UnityEngine.Transform,System.String,UnityEngine.Vector2,UnityEngine.Vector2,System.Int32,System.Action{System.String})"/> / <see cref="M:Yx.ModSdk.Unity.UiKit.TextInput(UnityEngine.Transform,System.String,UnityEngine.Vector2,UnityEngine.Vector2,System.Int32,System.Action{System.String})"/> 创建；回车或失焦时回调。只在主线程用。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Unity.UiInput.IsAlive">
+            <summary>输入框的物体还在。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Unity.UiInput.IsFocused">
+            <summary>用户正在这个框里输入。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Unity.UiInput.Text">
+            <summary>现在框里的文字。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiInput.SetText(System.String)">
+            <summary>直接改成某段文字（比如清空搜索框），不管用户是不是正在输入。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiInput.Show(System.String)">
+            <summary>显示一个值；用户正在输入时不动它（每帧 / 每秒刷新显示时用这个，免得把用户打到一半的字冲掉）。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.UiKit">
+            <summary>
+            最小的自绘界面工具：底板、一行底板、文字、文字按钮、数字 / 文本输入框。游戏的 UI 是 uGUI + TextMeshPro，这里直接在游戏的根 Canvas 上
+            建物体，用游戏自己的字体。来源是练习场 mod 里实机用稳了的那一套（按钮、输入框、面板都在游戏里点过）。
+            <para>
+            回调自动兜底：按钮 / 输入框的回调由 Unity 直接调过来，不经过 SDK，异常本来会漏进游戏；这里统一包成
+            <c>ctx.Guarded(...)</c>——异常记在你的 mod 头上、计入错误预算。
+            </para>
+            <para>
+            位置约定：<see cref="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color,System.Boolean)"/> 用锚点 + 轴心 + 相对锚点的位置（和 <see cref="M:Yx.ModSdk.Unity.Ui.CreateLabel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,System.Single,UnityEngine.Color,TMPro.TextAlignmentOptions)"/> 一样）；挂在面板下面的东西
+            （Row / Label / TextButton / 输入框）的 position 都相对父物体的**左上角**，x 向右为正、y 向下为**负**。
+            </para>
+            <example><code>
+            _ui = new UiKit(ctx);
+            var top = new Vector2(0.5f, 1f);
+            GameObject bar = _ui.Panel("MyBar", top, top, new Vector2(0f, -4f), new Vector2(300f, 52f), new Color(0f, 0f, 0f, 0.6f), true);
+            if (bar == null) return;                       // 还没有 Canvas（场景没加载完）：下一帧再试
+            _ui.TextButton(bar.transform, "go", "开始", new Vector2(6f, -6f), new Vector2(120f, 40f), OnGo);
+            // OnDisable 里：_ui.DestroyAll();
+            </code></example>
+            只在主线程用。实机：这套写法在练习场里验证过；作为 SDK 的 UiKit 本身还没有单独实机跑过。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.#ctor(Yx.ModSdk.ModContext)">
+            <param name="ctx">你的 mod 的上下文（回调的异常记在它头上）。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color,System.Boolean)">
+            <summary>
+            在游戏的根 Canvas 上建一块底板（放在最上层）。
+            </summary>
+            <param name="name">物体名（排错时在层级里找它）。</param>
+            <param name="anchor">锚点，0–1：(0,1) 左上、(0.5,1) 上边缘居中、(1,0.5) 右边缘居中。</param>
+            <param name="pivot">轴心，通常和 anchor 取同一个值。</param>
+            <param name="position">相对锚点的偏移（像素，Canvas 坐标）。</param>
+            <param name="size">宽高。</param>
+            <param name="background">底色（带透明度）。</param>
+            <param name="blockClicks">true = 挡住点击，不让它穿到底下的游戏界面（控制栏这类要点的面板）；false = 纯显示的悬浮窗。</param>
+            <returns>底板的物体；现在没有根 Canvas（场景还没加载完）时返回 null。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color)">
+            <summary>同上，挡住点击（要点的面板最常见的情况）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.Destroy(UnityEngine.GameObject)">
+            <summary>销毁一块用 <see cref="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color,System.Boolean)"/> 建的底板（连同挂在它下面的东西），并不再跟踪它。传 null 什么都不做。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.Row(UnityEngine.Transform,System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color)">
+            <summary>挂在别的物体下面的一条底板（position / size 相对父物体左上角，y 向下为负）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.Label(UnityEngine.Transform,System.String,System.String,UnityEngine.Vector2,UnityEngine.Vector2,System.Single)">
+            <summary>一段文字（自动换行、不挡点击）。position / size 相对父物体左上角。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.TextButton(UnityEngine.Transform,System.String,System.String,UnityEngine.Vector2,UnityEngine.Vector2,System.Action)">
+            <summary>文字按钮。onClick 里抛的异常会被接住并记到 mod 头上。</summary>
+            <param name="parent">挂在谁下面（通常是 <see cref="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color,System.Boolean)"/> 返回的物体的 transform）。</param>
+            <param name="name">物体名；也出现在回调出错时的日志里。</param>
+            <param name="text">按钮上的字。</param>
+            <param name="position">相对父物体左上角的位置（x 向右为正，y 向下为负）。</param>
+            <param name="size">宽高。</param>
+            <param name="onClick">点击时执行（主线程）。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.NumberInput(UnityEngine.Transform,System.String,UnityEngine.Vector2,UnityEngine.Vector2,System.Int32,System.Action{System.String})">
+            <summary>整数输入框（只能输数字）。回车或失焦时把框里的文字交给 onEndEdit——文字可能是空的，自己解析、自己校验范围。</summary>
+            <param name="parent">挂在谁下面（通常是 <see cref="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color,System.Boolean)"/> 返回的物体的 transform）。</param>
+            <param name="name">物体名；也出现在回调出错时的日志里。</param>
+            <param name="position">相对父物体左上角的位置（x 向右为正，y 向下为负）。</param>
+            <param name="size">宽高。</param>
+            <param name="maxDigits">最多几位。</param>
+            <param name="onEndEdit">回车或失焦时拿到框里的文字（主线程）。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.TextInput(UnityEngine.Transform,System.String,UnityEngine.Vector2,UnityEngine.Vector2,System.Int32,System.Action{System.String})">
+            <summary>普通文本输入框（中文走系统输入法）。回车或失焦时回调。</summary>
+            <param name="parent">挂在谁下面（通常是 <see cref="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color,System.Boolean)"/> 返回的物体的 transform）。</param>
+            <param name="name">物体名；也出现在回调出错时的日志里。</param>
+            <param name="position">相对父物体左上角的位置（x 向右为正，y 向下为负）。</param>
+            <param name="size">宽高。</param>
+            <param name="maxLength">最多几个字符。</param>
+            <param name="onEndEdit">回车或失焦时拿到框里的文字（主线程）。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UiKit.DestroyAll">
+            <summary>销毁用 <see cref="M:Yx.ModSdk.Unity.UiKit.Panel(System.String,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Vector2,UnityEngine.Color,System.Boolean)"/> 建的全部底板（连同挂在它们下面的东西）。在 OnDisable 里调：热重载时宿主不会替你清界面。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.UnityKeys">
+            <summary>
+            热键名 → Unity 按键状态（主线程）。宿主用它轮询 <c>ctx.Input</c> 注册的热键；mod 一般用 <c>ctx.Input.RegisterHotkey</c>，
+            只有想自己判断「某个键现在是不是按着」时才直接调。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.UnityKeys.IsDown(System.String)">
+            <summary>这个键此刻是不是按着（按住期间一直为 true，不是只在按下那一帧）。</summary>
+            <param name="name">
+            键名，必须是大写的规范写法（和热键绑定规范化之后的写法一致）：
+            修饰键 <c>CTRL</c> / <c>SHIFT</c> / <c>ALT</c>（左右任意一个）；字母 <c>A</c>–<c>Z</c>；主键盘数字 <c>0</c>–<c>9</c>（不含小键盘）；<c>F1</c>–<c>F15</c>；
+            <c>TAB</c>、<c>SPACE</c>、<c>ENTER</c>、<c>ESC</c>（或 <c>ESCAPE</c>）、<c>UP</c> / <c>DOWN</c> / <c>LEFT</c> / <c>RIGHT</c>、<c>BACKQUOTE</c>、
+            <c>MOUSE0</c> / <c>MOUSE1</c> / <c>MOUSE2</c>（鼠标左 / 右 / 中键）。
+            </param>
+            <returns>按着返回 true；没按、或键名不认识（含小写、空串）返回 false。</returns>
+            <exception cref="T:System.ArgumentNullException">name 为 null。</exception>
+        </member>
+        <member name="T:Yx.ModSdk.Game.SelfState">
+            <summary>
+            Current values of the main player (the player the HUD shows; equals self unless spectating).
+            Same sources as PlayerSelfInfoItem: current BattlePlayerData, not lastRoundData.
+            </summary>
+            <remarks>
+            <c>StateApi.Self()</c> 的返回值：「主视角玩家」（界面上自身信息栏显示的那位）此刻的数值快照，不会自动更新，要新值就再取一次。
+            不在观战时就是自己（<see cref="F:Yx.ModSdk.Game.SelfState.IsSelf"/> 为 true）。实机：PASS（03e）。
+            </remarks>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.Uid">
+            <summary>这位玩家的 uid；没有时为空串。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.IsSelf">
+            <summary>是不是本机登录的玩家本人；观战别人时为 false。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.Life">
+            <summary>命元 (BattlePlayerData.life). NOT hit points.</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.MaxHp">
+            <summary>生命上限 = LevelConfig(level).baseMaxHp + extraMaxHp (PlayerSelfInfoItem.RefreshMaxHp).</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.ExtraMaxHp">
+            <summary>境界基础值之外额外获得的生命上限（已经算进 <see cref="F:Yx.ModSdk.Game.SelfState.MaxHp"/>）。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.TiPo">
+            <summary>体魄 = permanentBuffTempDatas[BuffType.TiPo = 10023].</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.TiPoMax">
+            <summary>体魄上限 = permanentBuffTempDatas[BuffType.TiPoShangXian = 10024].</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.Level">
+            <summary>境界 (Proto.Level as int: 1 炼气 .. 5 化神, 6 返虚).</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.Exp">
+            <summary>修为 (BattlePlayerData.exp).</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.ExpToNextBase">
+            <summary>Base 修为 needed for next level (LevelConfig.needExp); talents/buffs can lower it, -1 at max level.</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.LastRoundLife">
+            <summary>上一回合结束时的命元；没有上一回合数据（第 1 回合）时为 0。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.LastRoundMaxHp">
+            <summary>上一回合的生命上限（算法同 <see cref="F:Yx.ModSdk.Game.SelfState.MaxHp"/>）；没有上一回合数据时为 0。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.SelfState.LastRoundLevel">
+            <summary>上一回合的境界（取值同 <see cref="F:Yx.ModSdk.Game.SelfState.Level"/>）；没有上一回合数据时为 0。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Game.StateApi">
+            <summary>对局状态只读查询（主线程）。数据来自游戏当前的对局状态（BattleManager.currentGameStatus），不发包、不改任何东西；不在对局中时返回失败。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.StateApi.Round">
+            <summary>当前回合号。实机：PASS（03e）。</summary>
+            <returns>成功：回合号。失败：不在对局中或还没收到对局状态（「没有对局状态」）。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.StateApi.Self">
+            <summary>主视角玩家（不观战时就是自己）当前的命元、生命上限、体魄、境界、修为，以及上一回合的数值。实机：PASS（03e）。</summary>
+            <returns>成功：一份新的 <see cref="T:Yx.ModSdk.Game.SelfState"/> 快照。失败：「没有对局状态」或「没有玩家数据」。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.Game.BattleApi">
+            <summary>
+            斗法阶段（战斗回放）的查询与「提前跳过」（主线程）。跳过走的是游戏自己的流程：调出跳过按钮 → 点它 → 关掉跳过结算面板，
+            不改 Time.timeScale、不打断执行器、不切场景。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.BattleApi.IsBattling">
+            <summary>现在有没有战斗动画在播（任意一个 BattleExecuter 处于 isExecuting）。只读。实机：间接验证（03e，经 CloseSkipResult）。</summary>
+            <returns>
+            成功：true = 正在播；false = 没在播——不在对局里（没有 BattleManager）也算这种，返回的是 Ok = true、Value = false，不是失败。
+            只有内部抛异常时才 Ok = false。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.BattleApi.EnableSkipButton">
+            <summary>
+            Mirrors the game's own round-16 trigger (BattleExecuter ~1958: `replayPanel.showSkipAnimationButton = true;
+            replayPanel.Show();`) so skipping works from round 1 instead of waiting for the game to show the button itself.
+            Fails when there is no live, visible battle animation to skip, or in replay/review/judge modes where the
+            game itself never shows this button.
+            </summary>
+            <remarks>
+            中文：调出游戏自己的「跳过」按钮（和游戏第 16 回合起自动出现的是同一个），从第 1 回合就能用。
+            游戏会同时把回放面板的速度调到 4 倍并藏起倍速按钮；不想要加速就用 <see cref="M:Yx.ModSdk.Game.BattleApi.EnableSkipButton(System.Boolean)"/> 传 true。
+            实机：PASS（03e；「没有动画时报错」的负例未测）。
+            </remarks>
+            <returns>
+            成功：Value 为 "shown"（这次调出来的）或 "already"（本来就显示着）。
+            失败：没有 BattleManager、不在斗法阶段、没有对局状态、回放 / 裁判 / 复盘模式、没有正在播放且可见的战斗动画、找不到跳过面板。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.BattleApi.EnableSkipButton(System.Boolean)">
+            <summary>
+            Same as <see cref="M:Yx.ModSdk.Game.BattleApi.EnableSkipButton"/>, optionally without the speed-up that comes with it.
+            The game couples the two: BattleReplayPanel.OnShow, when showSkipAnimationButton is set, puts the panel's
+            curSpeed on its highest step (x4) and hides the speed button - that is what the player sees from round 16.
+            With <paramref name="keepNormalSpeed"/> the panel's own curSpeed property is put back to x1 right after the
+            panel is shown (the same property the panel's speed button drives; Time.timeScale is not written here).
+            Only applied when this call is the one that showed the panel ("shown"), never to a panel that was already up.
+            The game's own long-battle acceleration (BattleExecuter, by round count / elapsed time) is not touched.
+            </summary>
+            <remarks>
+            中文：同 <see cref="M:Yx.ModSdk.Game.BattleApi.EnableSkipButton"/>；keepNormalSpeed 为 true 时，调出按钮之后经面板自己的 curSpeed 属性把速度放回 1 倍
+            （和玩家点倍速按钮是同一个属性，不直接写 Time.timeScale）。只在这次调用真的调出了面板（返回 "shown"）时才改速度，
+            面板本来就开着（"already"）不动它。游戏自己的长战斗加速不受影响。实机：调出按钮这一步 PASS（03e）；keepNormalSpeed 放回 1 倍的效果没有单独的验证记录。
+            </remarks>
+            <param name="keepNormalSpeed">true = 只要按钮、不要 4 倍速；false = 和游戏原版行为一样。</param>
+            <returns>成功：Value 为 "shown" 或 "already"。失败原因同 <see cref="M:Yx.ModSdk.Game.BattleApi.EnableSkipButton"/>。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.BattleApi.Skip">
+            <summary>
+            跳过当前战斗：先调出跳过按钮（同 <see cref="M:Yx.ModSdk.Game.BattleApi.EnableSkipButton"/>），再像玩家一样点它（SkipAnimationButton）。
+            之后游戏会弹出跳过结算面板（约 5 秒后自动关），想提前关用 <see cref="M:Yx.ModSdk.Game.BattleApi.CloseSkipResult"/>。实机：PASS（03e）。
+            </summary>
+            <returns>成功：Value 为 "dispatched"（已经点下去，战斗随后由游戏自己收尾）。失败：EnableSkipButton 的各种原因，或「跳过按钮不可点」。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.BattleApi.CloseSkipResult">
+            <summary>Closes SkipBattleResultPanel early, the same as its own 5 s auto-close timer. Refuses while
+            the executers are still force-breaking under SkipBattleResultPanel's own BlockPanel window.</summary>
+            <remarks>
+            中文：提前关掉跳过结算面板（SkipBattleResultPanel），效果和它自己 5 秒后自动关闭一样。
+            战斗还在收尾（<see cref="M:Yx.ModSdk.Game.BattleApi.IsBattling"/> 仍为 true）时会拒绝，过一会儿再试。实机：PASS（03e）。
+            </remarks>
+            <returns>成功：Value 为 "closed"。失败：「战斗仍在结束中，请稍后再关闭」或「跳过结算面板未显示」。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.BattleApi.FindReplayPanel(BattlePanel)">
+            <summary>Shared lookup for EnableSkipButton/Skip: the BattleReplayPanel sub-panel, or null if not present.</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Game.SceneApi">
+            <summary>对局内的阶段查询（主线程，只读）。只想区分大厅 / 摆牌 / 战斗的话，用 <c>OnSceneChanged</c> 或 <c>SceneDetector.Detect()</c> 更方便。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.SceneApi.Current">
+            <summary>当前阶段，游戏 SceneType 枚举的数值：0 = 修炼阶段（摆牌），1 = 斗法阶段（战斗）。实机：PASS（03e）。</summary>
+            <returns>成功：阶段数值。失败：不在对局里（「没有 BattleManager」）。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.Game.GameStatusApi">
+            <summary>向服务器重新要一次对局状态（主线程）。这是 SDK 里唯一发协议包的接口，只用于无副作用的刷新。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.GameStatusApi.Req">
+            <summary>
+            Read request: GameStatusReq is a query; the reply goes through BattleManager.Refresh, the same path the
+            game uses after every battle and after a card-order error (CardPanel.ReloadCardOrder). Refresh can reopen
+            pending panels and send the game's own PendingDaoYunReq / SettleResultReq, exactly as a natural refresh would,
+            so only call it where the game itself would: in 修炼阶段, as a player.
+            </summary>
+            <remarks>
+            中文：发 GameStatusReq 让游戏刷新对局状态，回包走游戏自己的 BattleManager.Refresh（和每场战斗结束后的刷新是同一条路，
+            可能重新弹出还没处理的选择面板）。只在修炼阶段、自己是玩家时可用；回包是异步的，本方法返回时状态还没更新。实机：PASS（03e）。
+            </remarks>
+            <returns>成功：Value 为 true（请求已发出）。失败：「不在对局中」「还没有对局状态」「斗法阶段不请求」「观战中不请求」。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.Game.NetworkApi">
+            <summary>线路测速与「优化网络」（主线程）。对应游戏 设置-网络 页面的功能。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.NetworkApi.Analyze(System.Int32)">
+            <summary>
+            Read-only: pings every route (same call SettingsNetwork.OnEnable makes); results land in
+            AccountUtil.networkAnalyzeResults. Only side effect is that static array.
+            </summary>
+            <remarks>中文：测各条线路的延迟和丢包（只读，和打开 设置-网络 页面时游戏做的一样）。异步进行，结果过一会儿用 <see cref="M:Yx.ModSdk.Game.NetworkApi.Routes"/> 读。实机：PASS（03e）。</remarks>
+            <param name="pingAmount">每条线路 ping 几次；小于等于 0 时用 3。</param>
+            <returns>成功：Value 为 "dispatched"（已开始测，不代表测完）。失败：内部异常。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.NetworkApi.Routes">
+            <summary>读上一次 <see cref="M:Yx.ModSdk.Game.NetworkApi.Analyze(System.Int32)"/> 的结果（只读）。实机：PASS（03e）。</summary>
+            <returns>
+            成功：形如 <c>"current=1;0:35:0;1:48:2"</c>——current 是当前线路下标，后面每段是「线路下标:延迟:丢包百分比（整数）」。
+            还没测过时只有 <c>"current=N"</c> 这一段。失败：内部异常。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.NetworkApi.Optimize">
+            <summary>
+            Presses 设置-网络-优化网络 (SettingsNetwork.NetworkOptimizeButton). The game then shows its own
+            confirmation box (the operation reloads the Home scene and leaves the match); nothing happens
+            until that box is confirmed. Requires the settings network page to be open.
+            </summary>
+            <remarks>
+            中文：点 设置-网络 里的「优化网络」按钮。游戏随后弹出自己的确认框（确认后会回到 Home、离开当前对局），
+            玩家确认之前什么都不会发生。需要 设置-网络 页面正开着。实机：PASS（03e）。
+            </remarks>
+            <returns>成功：Value 为 "confirm-shown"（确认框已弹出）。失败：「设置-网络页面未打开」。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.Game.GameUi">
+            <summary>
+            Shared helpers for driving the game's own panels (main thread only).
+            Every state-changing API goes through a real Button/Toggle handler or the
+            same public method the game's drag/drop code calls.
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.GameUi.Battle">
+            <summary>BattlePanel only while the Battle scene is loaded and BattleManager is alive.</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.GameUi.IsSubShown(BattlePanel,System.String)">
+            <summary>
+            Side-effect free "is this sub panel on screen": uses the CLR UIPanelBase lookup
+            (ILRPanelBase.FindILRSubPanel may SetActive(true/false) a never-initialised panel).
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.GameUi.Click(UnityEngine.UI.Button)">
+            <summary>Same gate as UnityEngine.UI.Button.Press: active and interactable (incl. parent CanvasGroups).</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.GameUi.ActiveToggles(UnityEngine.UI.ToggleGroup)">
+            <summary>Active toggles that belong to the group, in hierarchy order.</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.GameUi.PlacementBlocked(BattleManager,CardPanel)">
+            <summary>
+            Placement-phase gate shared by Move/Refine/Swap: the same conditions under which the
+            game lets a human start a drag. Returns null when allowed, otherwise the reason.
+            </summary>
+        </member>
+        <member name="T:Yx.ModSdk.Game.PlacementApi">
+            <summary>
+            摆牌阶段操作（主线程）。所有改变状态的操作都走游戏自身的面板方法 / 按钮 / 开关（和玩家点击、拖拽是同一个入口），
+            不直接发送协议包（SimpleClientPact / SelectCareerReq 等）。
+            <para>
+            约定：除 <see cref="M:Yx.ModSdk.Game.PlacementApi.HandIds"/> 外都返回 <c>Result&lt;T&gt;</c>，不抛异常；成功时 Value 是一个简短的英文标记（如 "moved"），失败时 Error 是中文原因。
+            返回成功只表示「已经按下去 / 已经交给游戏」，服务器确认和动画是异步的，要看结果就订阅 <c>ctx.Events.OnHandChanged</c> 或过一会儿再读。
+            </para>
+            <para>
+            摆牌类操作（Move / Unplace / Refine / Swap）共用一道前置门控，和游戏允许玩家开始拖拽的条件相同：在修炼阶段、不在观战、
+            自己在对局中且未结算、摆牌区可交互、不在发牌 / 插入模式、没有牌正在被拖。不满足时 Error 说明原因。
+            连续调用时游戏自己的动画门控会拒绝（「该手牌正在播放动画」），不需要自己排队，隔几帧重试即可。
+            </para>
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.Board">
+            <summary>
+            读当前手牌（只读）。名字叫 Board，但返回的是手牌区的牌，不是已经摆到场上格子里的牌。实机：PASS（03e）。
+            </summary>
+            <returns>
+            成功：按手牌顺序的新列表（可能为空），每项的 <see cref="F:Yx.ModSdk.Game.HandCard.Slot"/> 是手牌序号（不是格子下标）、<see cref="F:Yx.ModSdk.Game.HandCard.Id"/> 是卡牌 id。
+            失败：不在摆牌界面或还没有对局状态（「没有 CardPanel」）。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.HandIds">
+            <summary>
+            <see cref="M:Yx.ModSdk.Game.PlacementApi.Board"/> 的精简版：只要卡牌 id。注意它是这个类里唯一不返回 Result 的方法。
+            <c>ctx.Events.OnHandChanged</c> 推送的就是这份数据。实机：PASS（03e）。
+            </summary>
+            <returns>按手牌顺序的卡牌 id 新列表（下标就是 handIdx，可能为空）；读取失败（不在摆牌界面等）时返回 null，调用方要判空。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.Move(System.Int32,System.Int32)">
+            <summary>把手牌第 handIdx 张摆到第 gridIdx 个格子（CardGrid.OnDrop 调用的同一个 CardPanel.MoveToGrid）。实机：PASS（03e）。</summary>
+            <param name="handIdx">手牌序号（<see cref="F:Yx.ModSdk.Game.HandCard.Slot"/>，从 0 开始）。</param>
+            <param name="gridIdx">场上格子下标（从 0 开始，游戏 CardPanel.GetCardGrids 的顺序）。</param>
+            <returns>
+            成功：Value 为 "moved"。失败：前置门控的原因、「handIdx 越界」「该位置不是手牌」「该手牌正在播放动画」「gridIdx 越界」「格子未解锁或不可见」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.Unplace(System.Int32)">
+            <summary>把第 gridIdx 格的牌放回手牌（右键/拖回手牌调用的同一个 CardPanel.MoveToHand）。实机：PASS（03e）。</summary>
+            <param name="gridIdx">场上格子下标（从 0 开始）。</param>
+            <returns>成功：Value 为 "unplaced"。失败：前置门控的原因、「gridIdx 越界」「该格没有牌」「该牌正在播放动画」。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.Refine(System.Int32)">
+            <summary>炼化第 handIdx 张手牌（RefineArea.OnDrop 调用的同一个 RefineArea.RefineCard）。实机：PASS（03e）。</summary>
+            <param name="handIdx">手牌序号（从 0 开始）。</param>
+            <returns>
+            成功：Value 为 "refined"。失败：前置门控与手牌检查的原因、「炼化区当前不可用」、
+            「炼化被拒绝」（游戏自己判定该牌不可炼化，并且已经给玩家弹了提示）。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.Swap(System.Int32)">
+            <summary>
+            换掉第 handIdx 张手牌（ReplaceArea.OnDrop 调用的同一个 ReplaceArea.ReplaceCard）。
+            必须先确认换牌区可见：ReplaceCard 先扣换牌次数，之后 ReplaceCardAsync 才检查 ForbidReplaceCard。实机：PASS（03e）。
+            </summary>
+            <param name="handIdx">手牌序号（从 0 开始）。</param>
+            <returns>
+            成功：Value 为 "swapped"（新牌稍后由服务器发下来，手牌会变）。失败：前置门控与手牌检查的原因、「换牌区当前不可用」「本模式禁止换牌」
+            「没有换牌次数信息」、「换牌被拒绝」（次数为 0 或该牌不可换，游戏已经给玩家弹了提示）。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.ReadyState">
+            <summary>只读：准备按钮与服务器预备标记的当前状态，供实机验证与诊断。实机：PASS（03e）。</summary>
+            <returns>
+            成功：一个新字典，固定 4 个键，值都是装箱的 bool（取用时 <c>(bool)d["layerReady"]</c>）：
+            <c>layerReady</c> = 准备层（ReadyLayer）的准备按钮已处于「已准备」；
+            <c>layerInteractable</c> = 该准备按钮现在可点；
+            <c>scrollReady</c> = 卡牌卷轴（CardPanel.cardScroll）上的那个准备按钮已处于「已准备」；
+            <c>isPreReady</c> = 服务器下发的自己的预备标记（BattlePlayerData.isPreReady）。
+            对应的对象不存在时该项为 false。失败：不在对局界面（「没有 ReadyLayer」）。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.Ready">
+            <summary>点准备：与 ReadyCountdownButton.OnPointerClick 一致，先检查按钮可交互，再调 ReadyLayer.PressReadyButton。</summary>
+            <returns>
+            成功：Value 为 "ready"（这次点下去了）或 "already-ready"（本来就是已准备，什么都没做）。
+            失败：「没有 ReadyLayer」「不在修炼阶段」「没有准备按钮」「准备按钮当前不可点」。
+            </returns>
+            <remarks>实机：PASS（03e，练习局语义；"already-ready" 分支没测到）。</remarks>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.FateSelect(System.Int32)">
+            <summary>选天衍仙命第 index 项：FateStrategyItem.toggle → currentSelectedIndex，再点 ConfirmButton。实机：未覆盖（只按反编译写的，用前自己测）。</summary>
+            <param name="index">选项下标（从 0 开始，面板 fateStrategyItems 的顺序）。</param>
+            <returns>
+            成功：Value 为 "fate:" + 所选策略 id。失败：「天衍仙命面板未打开」「观战中不能选择」「index 越界」「该选项不可选」「选择没有生效」「确定按钮不可点」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.DaoyunSelect(System.Int32)">
+            <summary>选道韵 daoYunId：逐个打开可选开关直到 panel.daoYun == daoYunId，再点 ConfirmBtn。实机：未覆盖（只按反编译写的，用前自己测）。</summary>
+            <param name="daoYunId">道韵 id（不是下标）；必须在当前面板给出的选项里。</param>
+            <returns>
+            成功：Value 为 "daoyun:" + daoYunId。失败：「道韵面板未打开」「观战中不能选择」「当前选项里没有道韵 N」（此时会把原来选中的那项选回去）「确定按钮不可点」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.FateBranchSelect(System.Int32)">
+            <summary>选命运分支第 index 项（fateBranchData.types[index]）：打开对应开关，再点 ConfirmButton。实机：未覆盖（只按反编译写的，用前自己测）。</summary>
+            <param name="index">选项下标（从 0 开始，对局状态里 fateBranchData.types 的顺序）。</param>
+            <returns>
+            成功：Value 为 "fatebranch:" + 分支类型的数值。失败：「命运分支面板未打开」「没有 fateBranchData」「index 越界」「没找到对应选项」「确定按钮不可点」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.TalentSelect(System.Int32)">
+            <summary>
+            突破后选仙命（TalentSelectionPanel）第 index 项；index &lt; 0 点「随机」。
+            仙命 93–96 会先展开子选项，面板保持打开，需要再调用一次。
+            实机：PASS（03e；随机与 93–96 的两步流程没测到）。
+            </summary>
+            <param name="index">选项下标（从 0 开始，按面板上可见开关的顺序）；小于 0 表示点「随机」按钮。</param>
+            <returns>
+            成功：Value 为 "talent:" + 仙命 id，或 "talent:random"。
+            失败：「仙命选择面板未打开」「观战中不能选择」「index 越界」「该项未解锁」「该项不可选」「确定按钮不可点」「随机按钮不可点」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.SelectCareer(System.Int32,System.Boolean,System.Boolean)">
+            <summary>
+            选择（副）职业：点对应职业卡片（触发面板私有 OnSelected），再点 ConfirmBtn；random 时点 RandomBtn。
+            secondary 只用于核对：主/副职业由游戏打开面板时决定（panel.isFZJX），不由调用方改写。
+            实机：部分验证——「面板未打开」与主 / 副职业核对正确；7 个职业的匹配和 random 没测到。
+            </summary>
+            <param name="career">职业的数值 id（游戏用 TranslateUtil.GetCareerTranslate 把它换成职业名，再按名字找卡片）；random 为 true 时忽略。</param>
+            <param name="random">true = 点「随机」按钮，不指定职业。</param>
+            <param name="secondary">你认为现在选的是不是副职业；和面板实际状态不一致时直接失败，防止选错。</param>
+            <returns>
+            成功：Value 为 "career:" + career，或 "career:random"。
+            失败：「职业选择面板未打开」「当前是副职业选择」/「当前是主职业选择」「列表里没有职业 X」「职业 X 未解锁」「确定按钮不可点」「随机按钮不可点」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.Breakthrough">
+            <summary>突破：点自身信息里的 LevelUpBtn（PlayerSelfInfoItem.OnLevelUpBtnClick 负责模式分支与条件）。实机：PASS（03e）。</summary>
+            <returns>
+            成功：Value 为 "breakthrough"（按钮已点；之后若弹出仙命选择面板，用 <see cref="M:Yx.ModSdk.Game.PlacementApi.TalentSelect(System.Int32)"/> 处理）。
+            失败：「没有自身信息栏」「当前不能突破（突破按钮未显示）」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.UiSelect(System.Int32)">
+            <summary>
+            通用「选项 + 确定」：只在最上层显示的 ToggleGroup 里按可见顺序选第 index 项，再点同一面板内的确定按钮。
+            优先使用上面的专用函数。实机：PASS（03e）。
+            </summary>
+            <param name="index">选项下标（从 0 开始）；小于 0 表示不改选项、直接点确定。</param>
+            <returns>
+            成功：Value 为 "uiselect"。失败：「没有可见的「选项 + 确定」面板」「同时有 N 个选项面板，请改用专用选择函数」「选项越界」「该选项不可选」「找不到可点的确定按钮」。
+            </returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.PlacementApi.ClickButton(System.String)">
+            <summary>点击文字（子串）匹配、且可交互的按钮：只点文字所在的那个按钮本身。匹配到多个时点第一个能点的。实机：PASS（03e）。</summary>
+            <param name="text">按钮上显示的文字或其中一段（区分大小写，按当前游戏语言）。</param>
+            <returns>成功：Value 为 "clicked"。失败：「text 为空」或「没有文字为 X 的可用按钮」。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.Game.Result`1">
+             <summary>
+             GameAPI（<c>Yx.ModSdk.Game</c>）的统一返回值：这些方法自己不抛异常，条件不满足或内部出错都变成 Ok = false + 中文原因。
+             先看 <see cref="P:Yx.ModSdk.Game.Result`1.Ok"/>，再用 <see cref="P:Yx.ModSdk.Game.Result`1.Value"/>。
+             </summary>
+             <typeparam name="T">成功时的值类型。</typeparam>
+             <example>
+             <code>
+             Result&lt;int&gt; round = StateApi.Round();
+             if (!round.Ok) { Context.Log.Warn(round.Error); return; }
+             Context.Log.Info("round " + round.Value.ToString(CultureInfo.InvariantCulture));
+            
+             Result&lt;string&gt; moved = PlacementApi.Move(0, 2);
+             if (!moved.Ok) Context.Log.Warn("摆牌失败：" + moved.Error);
+             </code>
+             </example>
+        </member>
+        <member name="P:Yx.ModSdk.Game.Result`1.Ok">
+            <summary>调用是否成功。false 时 <see cref="P:Yx.ModSdk.Game.Result`1.Value"/> 无意义，原因在 <see cref="P:Yx.ModSdk.Game.Result`1.Error"/>。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Game.Result`1.Value">
+            <summary>成功时的结果；失败时是 <c>default(T)</c>（引用类型为 null、int 为 0、bool 为 false），所以不要不看 Ok 就用。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Game.Result`1.Error">
+            <summary>失败原因（中文，可直接写日志或提示给玩家；内部异常时形如「异常类型名: Message」）；成功时是空串，不会是 null。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Game.Result`1.Success(`0)">
+            <summary>构造一个成功结果（Ok = true，Error = ""）。SDK 内部用；mod 给自己的封装函数沿用同一套返回约定时也可以用。</summary>
+            <param name="value">结果值。</param>
+            <returns>新的成功结果。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Game.Result`1.Fail(System.String)">
+            <summary>构造一个失败结果（Ok = false，Value = <c>default(T)</c>）。</summary>
+            <param name="error">失败原因；null 按空串处理。</param>
+            <returns>新的失败结果。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.Game.HandCard">
+            <summary><c>PlacementApi.Board()</c> 返回的一张手牌。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.HandCard.Slot">
+            <summary>
+            手牌序号（从 0 开始，按手牌区的顺序），就是 <c>PlacementApi.Move / Refine / Swap</c> 的 handIdx。
+            注意它不是场上格子的下标（格子用 gridIdx）。手牌一变序号就会变，操作前重新取。
+            </summary>
+        </member>
+        <member name="F:Yx.ModSdk.Game.HandCard.Id">
+            <summary>卡牌 id（游戏的 cardInfo.id）；读不到卡牌信息时为 0。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Rpc.RpcDispatcher">
+            <summary>字符串 RPC：请求 {"name":..,"args":[..]}，响应 {"ok":bool,"value":..,"error":string}。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.IlRuntimeAccess">
+            <summary>
+            通过反射访问 ILMethod 的私有字段（设计要求的反射点）。字段名来自 ILRuntime 源码：
+            def / body / bodyRegister / exceptionHandler / exceptionHandlerR / jumptables / jumptablesR / registerSymbols /
+            jitPending / symbolFixed / warmupCounter / localVarCnt / variables。
+            </summary>
+        </member>
+        <member name="F:Yx.ModSdk.Hooks.IlRuntimeAccess.Domain">
+            <summary>游戏的 ILRuntime AppDomain，由 Loader 的 SetAppDomain 在 Start 前后任意时刻设置。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.IlRuntimeAccess.MissingFields">
+            <summary>ILMethod 上找不到的字段名，加上 IlEmit 缺的 Cecil 成员；全部为空才可安装钩子。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.IlRuntimeAccess.ResetCompiledBody(ILRuntime.CLR.Method.ILMethod,ILRuntime.Mono.Cecil.MethodDefinition)">
+            <summary>清掉编译缓存，让 ILRuntime 下次调用时按修改后的 def 重新 InitCodeBody。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.IlRuntimeAccess.DispatchRefs(ILRuntime.Runtime.Enviorment.AppDomain)">
+            <summary>
+            HookDispatch 三个静态方法的 MethodDefinition 直接作为 call 操作数：ILRuntime 按类型全名解析，
+            不需要（也没有，已被裁剪）ImportReference。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.HookInstaller.Apply(Yx.Shared.HookSite)">
+            <summary>首次给站点安装重写。失败抛 InvalidOperationException 并写入 site.ApplyError。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.SaturateInstaller">
+            <summary>
+            饱和算术改写的游戏侧：找到热更类型的 ILMethod → 取 Cecil 的 def → SaturateRewriter.Apply → 清掉 ILRuntime 的编译缓存
+            （下次调用按改过的 def 重新编译）。嵌套类型（async 状态机、闭包类）一并处理——公式多半在状态机的 MoveNext 里。
+            改写不可撤销：本次游戏进程内一直有效，重启游戏恢复。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SaturateInstaller.Apply(System.String,System.String,System.Int32)">
+            <summary>method 为 null / 空 = 整个类型（含嵌套类型）；否则只改那一个方法（async 方法则改它的状态机）。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.SaturateInstaller.Flat">
+            <summary>当前类型（含嵌套类型）摊平后的方法表。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SaturateInstaller.Step(Yx.Shared.SaturateJob,System.Int32)">
+            <summary>推进作业：处理到这一步的指令预算用完为止（至少处理一个方法）。返回是否全部做完。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.ConstInstaller">
+            <summary>
+            常量覆盖的游戏侧：找到热更方法（async 方法则找它的状态机的 MoveNext）→ ConstRewriter.Apply → 清掉 ILRuntime 的编译缓存。
+            改写后那条指令多了一次对 ConstOverrides.Get 的调用；槽关着时返回原值，行为不变。
+            </summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hosting.GameRuntime">
+            <summary>游戏绑定层接入 Core 的接缝。Bootstrap.Start 在 SdkRuntime.Initialize 之后调用。</summary>
+        </member>
+    </members>
+</doc>

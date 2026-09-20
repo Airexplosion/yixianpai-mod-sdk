@@ -1,0 +1,172 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Yx.ModSdk.Testing</name>
+    </assembly>
+    <members>
+        <member name="T:Yx.ModSdk.Testing.LogItem">
+            <summary>从 LogBuffer 抽出的一条日志（kind == "log"），由 <c>TestHost.Logs()</c> 返回。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Testing.LogItem.Seq">
+            <summary>缓冲里的序号，日志和事件共用一个递增计数，可以用来比较先后。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Testing.LogItem.Src">
+            <summary>来源：mod 自己写的日志是它的 mod id；宿主自身的是 <c>yx.loader</c>。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Testing.LogItem.Lvl">
+            <summary>级别，小写字符串：<c>"debug"</c> / <c>"info"</c> / <c>"warn"</c> / <c>"error"</c>（不是枚举，断言时直接比字符串）。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.Testing.LogItem.Msg">
+            <summary>日志正文。宿主替 mod 记的错误形如「OnLoad 失败：异常类型名: Message」「热键 greet 异常：……」。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Testing.TestHost">
+            <summary>
+            内存宿主：在普通 .NET 里按与游戏内 Loader 相同的生命周期驱动 mod（登记 → 实例化 → OnLoad → 配置/事件/热键/时钟/数据/钩子 → 停用/热重载）。
+            <para>
+            TestHost 是进程级的（背后是 SdkRuntime 的静态状态）：同一进程内只能串行使用，Dispose 后才能再次 Start。
+            用 xunit 的 mod 作者项目必须加 <c>[assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)]</c>，
+            否则并行用例会互相踩到运行时。
+            </para>
+            Dispose 之后 Logs / Events 仍可读取已累积的记录，其余方法抛 ObjectDisposedException。
+            </summary>
+            <example>
+            <code>
+            using (TestHost host = TestHost.Start("1.7.3"))
+            {
+                ModMain mod = host.Load&lt;ModMain&gt;("com.example.demo", "1.0.0");
+                Assert.NotNull(mod);
+                Assert.Equal(1, host.PressHotkey("F8"));
+                host.Publish(Topics.Round, 3);
+                host.Tick(1.0);
+                Assert.DoesNotContain(host.Logs(), l =&gt; l.Lvl == "error");
+            }
+            </code>
+            </example>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Start(System.String)">
+            <summary>初始化 SDK 运行时并返回宿主。务必放进 <c>using</c>（或在测试结束时 Dispose），否则下一个用例 Start 会失败。</summary>
+            <param name="gameVersion">mod 从 <c>ctx.Versions.Game</c> 读到的游戏版本；不传或 null 为空串。</param>
+            <returns>新的宿主；虚拟时钟从 0 开始。钩子安装、饱和改写、常量覆盖都换成了假的实现（只记账，不改任何代码）。</returns>
+            <exception cref="T:System.InvalidOperationException">上一个 TestHost 还没 Dispose（常见原因：xunit 并行没关）。</exception>
+        </member>
+        <member name="P:Yx.ModSdk.Testing.TestHost.Hooks">
+            <summary>
+            钩子站点表：<c>host.Hooks.Sites</c> 里每个站点有 Key（"类型.方法/参数个数"）、Applied、HandlerCount、Snapshot()，
+            用来断言 mod 登记了哪些钩子、停用后处理器有没有清掉。这里的安装器只把 Applied 置 true，不做 IL 重写。
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">已经 Dispose。</exception>
+        </member>
+        <member name="P:Yx.ModSdk.Testing.TestHost.Now">
+            <summary>当前虚拟时钟（秒）。从 0 开始，只有 <see cref="M:Yx.ModSdk.Testing.TestHost.Tick(System.Double)"/> 会推进它；Dispose 后仍可读。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Testing.TestHost.Dropped">
+            <summary>LogBuffer 因容量满而丢弃的记录数累计（正常测试应为 0）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Load``1(System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Collections.Generic.Dictionary{System.String,System.Object})">
+            <summary>登记并加载一个 mod。</summary>
+            <returns>加载成功返回 mod 实例；OnLoad 失败（或实例化失败）时返回 null，看 <c>Find(id)</c> 的 State / LastError。</returns>
+            <typeparam name="T">mod 的入口类（继承 YxMod、有公共无参构造函数）。</typeparam>
+            <param name="id">mod id（相当于 manifest.json 的 id）；<c>host.Logs(id)</c>、<c>host.Find(id)</c> 都用它。</param>
+            <param name="version">mod 版本，mod 里从 <c>ctx.Version</c> 读到。</param>
+            <param name="config">初始配置：section → key → value 的嵌套字典，模拟管理器下发；数值按 JSON 的习惯写成 double（如 <c>7.0</c>）。null = 全用默认值。</param>
+            <param name="data">初始 <c>ctx.Data</c>：key → value；数值同样写 double。null = 空。</param>
+            <exception cref="T:System.InvalidOperationException">id 以 <c>yx.</c> 开头，或这个 id 已经 Load 过（要重新加载用 <see cref="M:Yx.ModSdk.Testing.TestHost.Reload``1(System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Collections.Generic.Dictionary{System.String,System.Object})"/>）。</exception>
+            <exception cref="T:System.ObjectDisposedException">已经 Dispose。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Reload``1(System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Collections.Generic.Dictionary{System.String,System.Object})">
+            <summary>热重载：停用旧实例（若在运行）并用新的 config / data 重新加载；Generation 加一。失败时返回 null。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.SetConfig(System.String,System.Collections.Generic.Dictionary{System.String,System.Object})">
+            <summary>模拟管理器下发配置（section → key → value）；只有值有变化的键会触发 configChanged 与 OnChanged。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Tick(System.Double)">
+            <summary>
+            推进时钟并跑一帧：任务队列（含延时、每帧任务）→ mod 的 OnUpdate，顺序与游戏内 Loader 的 Pump 一致。
+            mod 回调里的异常照常由宿主记账；但与 Pump 不同，基础设施本身的异常会直接抛给测试，这是有意的。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.PressHotkey(System.String)">
+            <summary>按绑定字符串（如 "F8"、"Ctrl+Shift+D"，大小写不敏感）触发已登记的热键。</summary>
+            <returns>被触发的回调个数（未登记的组合返回 0）。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Publish(System.String,System.Object)">
+            <summary>
+            往事件总线发一条，驱动 mod 的 <c>ctx.Events.*</c> 订阅（同步回调，回调里的异常照常计入 mod 的错误预算）。
+            游戏里这些事件由 Loader 轮询游戏状态后发布；测试宿主不会自动发，<see cref="M:Yx.ModSdk.Testing.TestHost.SetScene(Yx.ModSdk.GameScene)"/> 也不会连带发战斗开始 / 结束。
+            </summary>
+            <param name="topic">话题，用 <c>Yx.ModSdk.Hosting.Topics</c> 的常量：Round、BattleStarted、BattleEnded、Hand、NetIn、NetOut。</param>
+            <param name="payload">
+            载荷，类型要和话题对上：Round → int（回合号）；Hand → <c>List&lt;int&gt;</c>（手牌 id）；BattleStarted / BattleEnded → null；
+            NetIn / NetOut → 一个消息对象（订阅的 T 能接住它才会回调）。
+            </param>
+            <exception cref="T:System.ObjectDisposedException">已经 Dispose。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.SetGameReady">
+            <summary>模拟「游戏就绪」：给所有在运行的 mod 调一次 OnGameReady。只有第一次调用有效；之后再 Load 的 mod 会在加载时自动补调。</summary>
+            <exception cref="T:System.ObjectDisposedException">已经 Dispose。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.SetScene(Yx.ModSdk.GameScene)">
+            <summary>
+            模拟场景变化：给所有在运行的 mod 调 OnSceneChanged，并记一条 scene 事件。和当前场景相同时什么都不做；之后再 Load 的 mod 会补调一次。
+            只通知场景，不发布战斗开始 / 结束、回合等事件（那些用 <see cref="M:Yx.ModSdk.Testing.TestHost.Publish(System.String,System.Object)"/>）。
+            </summary>
+            <param name="scene">新场景。游戏里不会把 Unknown 通知给 mod，测试里也不要传它。</param>
+            <exception cref="T:System.ObjectDisposedException">已经 Dispose。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.SoftDisable(System.String)">
+            <summary>
+            模拟管理器停用一个 mod：状态变 disabled、调用 OnDisable、自动清理它的热键 / 订阅 / 任务 / 服务 / 钩子处理器。
+            停用之后可以用 <see cref="M:Yx.ModSdk.Testing.TestHost.Reload``1(System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Collections.Generic.Dictionary{System.String,System.Object})"/> 再加载回来。
+            </summary>
+            <param name="id">mod id。</param>
+            <returns>停用了返回 true；id 没登记、或该 mod 不在运行（已停用 / 加载失败）返回 false。</returns>
+            <exception cref="T:System.ObjectDisposedException">已经 Dispose。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Find(System.String)">
+            <summary>查一个 mod 的运行时记录，用来断言状态。</summary>
+            <param name="id">mod id。</param>
+            <returns>
+            记录对象：State（<c>ModStates.Running / Disabled / Failed / Pending</c>）、LastError（最近一次错误，没有为空串）、
+            Generation（每加载一次加一）、Version；id 没登记过返回 null。
+            </returns>
+            <exception cref="T:System.ObjectDisposedException">已经 Dispose。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Logs(System.String)">
+            <summary>到目前为止的全部日志；src 为 mod id 时只取该 mod 的日志。Dispose 后仍可调用。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Events(System.String)">
+            <summary>非日志事件（configChanged / dataChanged / modState / configSchema / scene / gameReady / hotkeyConflict）。Dispose 后仍可调用。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.InvokePrefix(System.String,System.String,System.Int32,System.Object,System.Object[],System.Object@)">
+            <summary>模拟被钩方法被调用时的前置分发；返回 true 表示原方法应被跳过，result 为替代返回值。站点未登记时抛 InvalidOperationException。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.InvokePostfix(System.String,System.String,System.Int32,System.Object,System.Object[],System.Object)">
+            <summary>模拟被钩方法返回后的后置分发；返回后置处理器（可能改写过的）返回值。站点未登记时抛 InvalidOperationException。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.Dispose">
+            <summary>
+            收尾：取走剩余日志 / 事件，清空 SDK 运行时的全部静态状态，之后才能再 <see cref="M:Yx.ModSdk.Testing.TestHost.Start(System.String)"/>。可以重复调用。
+            不会调用 mod 的 OnDisable（要测停用逻辑用 <see cref="M:Yx.ModSdk.Testing.TestHost.SoftDisable(System.String)"/>）。之后 <see cref="M:Yx.ModSdk.Testing.TestHost.Logs(System.String)"/> / <see cref="M:Yx.ModSdk.Testing.TestHost.Events(System.String)"/> / <see cref="P:Yx.ModSdk.Testing.TestHost.Now"/> / <see cref="P:Yx.ModSdk.Testing.TestHost.Dropped"/> 仍可读，其余成员抛 ObjectDisposedException。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.FakeSaturate(System.String,System.String,System.Int32)">
+            <summary>测试宿主里没有游戏代码可改：返回一份空的成功报告。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.FakeConstPatch(Yx.Shared.ConstPatchRequest)">
+            <summary>测试宿主里不改任何代码，只当作「改到了一处」。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.FakeSaturateStep(Yx.Shared.SaturateJob,System.Int32)">
+            <summary>测试宿主里一步就「做完」。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Testing.TestHost.FailHookInstall(System.String,System.String,System.String)">
+            <summary>
+            让之后对这个方法登记钩子时失败（模拟游戏更新后方法改名 / 无法改写）：<c>ctx.Hooks.Prefix / Postfix</c> 抛
+            <see cref="T:System.InvalidOperationException"/>，<c>TryPrefix / TryPostfix</c> 和钩子组则记 warn、返回 null。
+            用来测「钩子不全时功能要关掉」这类降级逻辑。随 <see cref="M:Yx.ModSdk.Testing.TestHost.Dispose"/> 清空。
+            </summary>
+            <param name="typeFullName">类型全名。</param>
+            <param name="method">方法名（不分参数个数）。</param>
+            <param name="reason">异常消息。</param>
+        </member>
+    </members>
+</doc>

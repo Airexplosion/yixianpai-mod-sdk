@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net40</TargetFramework>
+    <AssemblyName>RoundNote</AssemblyName>
+    <RootNamespace>YxRoundNote</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <DebugType>none</DebugType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoWarn>CS1701;CS1702</NoWarn>
+    <OutputPath>plugins\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- 有 refs/ 就带上碰 Unity / 游戏的那部分（src/Game/NotePanel.cs 与入口里几行，都在 #if YX_GAME 里）；
+         没有 refs/ 也能编：那些代码不编进去，纯逻辑部分照常。 -->
+    <YxHasGameRefs Condition="Exists('$(YxRefs)UnityEngine.CoreModule.dll') And Exists('$(YxSdkDir)net40\Yx.ModSdk.dll')">true</YxHasGameRefs>
+    <DefineConstants Condition="'$(YxHasGameRefs)' == 'true'">$(DefineConstants);YX_GAME</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net40" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="Yx.ModSdk.Core"><HintPath>$(YxSdkDir)net40\Yx.ModSdk.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Yx.ModSdk" Condition="'$(YxHasGameRefs)' == 'true'"><HintPath>$(YxSdkDir)net40\Yx.ModSdk.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(YxHasGameRefs)' == 'true'">
+    <Reference Include="DarkSun.HotUpdate"><HintPath>$(YxRefs)DarkSun.HotUpdate.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="DarkSun.UI"><HintPath>$(YxRefs)DarkSun.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="DarkSun.Utility"><HintPath>$(YxRefs)DarkSun.Utility.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="wProtobuf"><HintPath>$(YxRefs)wProtobuf.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UniRx"><HintPath>$(YxRefs)UniRx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UniTask"><HintPath>$(YxRefs)UniTask.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.TextMeshPro"><HintPath>$(YxRefs)Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(YxRefs)UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(YxRefs)UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(YxRefs)UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(YxRefs)UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(YxRefs)UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextCoreModule"><HintPath>$(YxRefs)UnityEngine.TextCoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ILRuntime"><HintPath>$(YxRefs)ILRuntime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ILRuntime.Mono.Cecil"><HintPath>$(YxRefs)ILRuntime.Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <Target Name="CheckRefs" BeforeTargets="ResolveAssemblyReferences">
+    <Message Condition="'$(YxHasGameRefs)' != 'true'" Importance="high" Text="[roundnote] 没有游戏引用 DLL（YxRefs=$(YxRefs)）：按「纯 Core」构建，#if YX_GAME 里的代码（面板）不会编进去。要看完整效果，先运行 tools/yx-patch refs 生成 refs/。" />
+    <Error Condition="!Exists('$(YxSdkDir)net40\Yx.ModSdk.Core.dll')" Text="找不到 SDK DLL（YxSdkDir=$(YxSdkDir)）：确认仓库自带的 sdk/ 目录在，或设置 YX_SDK_DIR" />
+  </Target>
+</Project>

@@ -1,0 +1,1074 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Yx.ModSdk.Core</name>
+    </assembly>
+    <members>
+        <member name="T:Yx.Shared.ActionQueue">
+            <summary>主线程任务队列：Post/Delay 线程安全，其余方法仅主线程调用。</summary>
+        </member>
+        <member name="T:Yx.Shared.ConfigChangeHandler">
+            <summary>
+            持有一个变更回调的容器：ILRuntime 下把热更委托放进 CLR 泛型集合需要游戏未注册的委托适配器，
+            因此用我们自己（热更）代码里的类持有委托，集合里存放这个持有者而不是委托本身。
+            </summary>
+        </member>
+        <member name="T:Yx.Shared.ConfigStore">
+            <summary>单个 mod 的配置值（主线程）。结构：section → key → value。</summary>
+        </member>
+        <member name="T:Yx.Shared.DataChangedHandler">
+            <summary>变更回调的持有类（热更委托不进 CLR 泛型集合）。</summary>
+        </member>
+        <member name="T:Yx.Shared.DataStore">
+            <summary>
+            mod 自有数据的键值存储（主线程）：值限 JSON 可表示类型，单 mod 序列化后不超过 256 KB；
+            容器值（List/Dictionary）存取与上报一律深拷贝，外部持有的引用不会改到存储；
+            每次 Set/Remove 经回调上报，由管理器落盘。游戏内不做文件 IO。
+            </summary>
+        </member>
+        <member name="M:Yx.Shared.DataStore.Get(System.String)">
+            <summary>返回的是拷贝，改它不影响存储。</summary>
+        </member>
+        <member name="M:Yx.Shared.DataStore.Set(System.String,System.Object)">
+            <summary>value 为 null 等价于 Remove(key)（null 就是删除信号）。</summary>
+        </member>
+        <member name="M:Yx.Shared.DataStore.Snapshot">
+            <summary>深拷贝快照。</summary>
+        </member>
+        <member name="M:Yx.Shared.DataStore.DeepCopy(System.Object)">
+            <summary>深拷贝：List&lt;object&gt; / Dictionary&lt;string, object&gt; 递归复制，标量与 null 原样返回。</summary>
+        </member>
+        <member name="M:Yx.Shared.DataStore.Validate(System.Object)">
+            <summary>null = 合法；否则返回原因。支持 bool/int/long/float/double/string/List&lt;object&gt;/Dictionary&lt;string, object&gt;（递归）。</summary>
+        </member>
+        <member name="T:Yx.Shared.ErrorBudget">
+            <summary>滑动窗口错误计数：窗口内错误数达到上限即熔断。
+            用 double[] 环形缓冲实现，避免值类型的 CLR 泛型集合（ILRuntime/IL2CPP 下可能缺少 AOT 实例化）。</summary>
+        </member>
+        <member name="T:Yx.Shared.EventBus">
+            <summary>按主题分发的事件总线（主线程）；回调经宿主提供的保护调用执行。</summary>
+        </member>
+        <member name="T:Yx.Shared.HotkeyRegistry">
+            <summary>全局热键占用表（主线程）。</summary>
+        </member>
+        <member name="T:Yx.Shared.Json">
+            <summary>极简 JSON（ILRuntime 友好）。对象→Dictionary&lt;string, object&gt;，数组→List&lt;object&gt;，数字→double。</summary>
+        </member>
+        <member name="T:Yx.Shared.LogBuffer">
+            <summary>线程安全的日志/事件缓冲；管理器经 agent 定期 Drain。</summary>
+        </member>
+        <member name="T:Yx.Shared.OwnerCleanup">
+            <summary>持有一个 owner 清理回调的容器（见 ConfigChangeHandler 的注释，原因相同）。</summary>
+        </member>
+        <member name="T:Yx.Shared.ModHost">
+            <summary>mod 生命周期宿主（主线程）：加载、回调保护、错误熔断、软停用、热重载。</summary>
+        </member>
+        <member name="M:Yx.Shared.ModHost.RecordError(System.String,System.String,System.Exception)">
+            <summary>不经 try/catch 的记账入口：调用方已自行捕获异常（如钩子分发），这里只记日志、错误预算与自动停用。</summary>
+        </member>
+        <member name="M:Yx.Shared.ModHost.Replace(System.String,System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Collections.Generic.Dictionary{System.String,System.Object},System.Func{Yx.Shared.ModRuntime,Yx.Shared.IModInstance})">
+            <summary>热重载：data 传 null 时数据清空（与 config 一致，由管理器随计划下发）。</summary>
+        </member>
+        <member name="M:Yx.Shared.ModHost.Call(Yx.Shared.ModRuntime,System.String,Yx.Shared.IModInstance,System.Action)">
+            <summary>带实例身份校验的调用：若 rt.Instance 已不再是 expected（重入替换/停用），跳过。</summary>
+        </member>
+        <member name="F:Yx.Shared.RuntimePlan.PanelHotkey">
+            <summary>打开 Loader 面板的热键（管理器设置里配，启动时生效）。</summary>
+        </member>
+        <member name="T:Yx.Shared.ServiceRegistry">
+            <summary>mod 间服务表（主线程）。</summary>
+        </member>
+        <member name="T:Yx.Shared.ISubscription">
+            <summary>
+            可取消的订阅（替代 IDisposable，避免热更类型实现 CLR 接口）。<c>ctx.Events.*</c>、<c>ctx.MainThread.EveryFrame</c>、
+            <c>ctx.Hooks.Prefix / Postfix</c> 都返回它。只想订阅到 mod 停用为止的话不用存：宿主停用 / 热重载时会按 mod 自动取消。主线程使用。
+            </summary>
+            <example>
+            <code>
+            ISubscription _sub = ctx.Events.OnRoundStarted(OnRound);
+            // ……不再需要时
+            if (_sub.IsActive) _sub.Cancel();
+            </code>
+            </example>
+        </member>
+        <member name="M:Yx.Shared.ISubscription.Cancel">
+            <summary>取消订阅：之后不再回调。可以重复调用，也可以在自己的回调里调用；已经被宿主自动取消的再调也没事。</summary>
+        </member>
+        <member name="P:Yx.Shared.ISubscription.IsActive">
+            <summary>还在生效返回 true；自己 <see cref="M:Yx.Shared.ISubscription.Cancel"/> 过、或所属 mod 被停用 / 热重载后为 false。</summary>
+        </member>
+        <member name="T:Yx.Shared.HookContext">
+            <summary>
+            传给钩子处理器（<c>ctx.Hooks.Prefix / Postfix</c> 的回调）的上下文；同一次分发里同一站点的各个处理器共用一个实例。
+            Args 是装箱后的参数副本，改动会在前置结束后写回原方法参数（ref/out 参数除外）。
+            只在处理器执行期间有效，不要存起来以后用。实机：PASS（03f H01–H14）。
+            </summary>
+        </member>
+        <member name="M:Yx.Shared.HookContext.#ctor(System.Object,System.Object[])">
+            <summary>由钩子分发创建；mod 不需要自己 new（写测试时用 <c>TestHost.InvokePrefix / InvokePostfix</c>）。</summary>
+            <param name="instance">被钩方法的 this；静态方法为 null。</param>
+            <param name="args">装箱后的参数；null 按空数组处理。</param>
+        </member>
+        <member name="P:Yx.Shared.HookContext.Instance">
+            <summary>被钩的实例方法的 this（游戏的热更对象，按需强转成具体类型）；静态方法为 null。</summary>
+        </member>
+        <member name="P:Yx.Shared.HookContext.Args">
+            <summary>
+            参数的装箱副本，下标与方法参数顺序一致；无参数时是空数组，不会是 null。
+            前置里改 <c>Args[i]</c> 会在前置结束后写回原方法的参数（值类型要整个赋回去，如 <c>h.Args[1] = 5</c>）；
+            ref / out 参数在这里是 null，也不能改写。写回只发生在前置结束之后，后置里再改参数没有意义。
+            </summary>
+        </member>
+        <member name="P:Yx.Shared.HookContext.Result">
+            <summary>
+            返回值。后置里：是原方法的返回值（或前置 <see cref="M:Yx.Shared.HookContext.Skip(System.Object)"/> 给的值），可以改写，改完就是调用方拿到的返回值；void 方法为 null。
+            前置里：配合 <see cref="M:Yx.Shared.HookContext.Skip(System.Object)"/> 使用，一般不直接写。
+            </summary>
+        </member>
+        <member name="P:Yx.Shared.HookContext.Skipped">
+            <summary>
+            本次前置分发里有没有调过 <see cref="M:Yx.Shared.HookContext.Skip(System.Object)"/>。一旦跳过，后面的前置不再执行；
+            后置分发用的是新的上下文，所以后置里它总是 false——后置不能靠它判断原方法有没有真的执行。
+            </summary>
+        </member>
+        <member name="P:Yx.Shared.HookContext.Owner">
+            <summary>当前正在执行的这个处理器所属的 mod id（同一站点可以有多个 mod 的处理器）。</summary>
+        </member>
+        <member name="M:Yx.Shared.HookContext.Skip(System.Object)">
+            <summary>
+            （前置里用）跳过原方法，用 result 作为返回值；和前置返回 false 效果相同，区别是能指定返回值。
+            其余前置不再执行，但后置照常执行，后置看到的 <see cref="P:Yx.Shared.HookContext.Result"/> 就是这里给的值。
+            </summary>
+            <param name="result">替代返回值，类型要和原方法的返回类型对得上；void 方法传 null。</param>
+        </member>
+        <member name="T:Yx.Shared.HookHandler">
+            <summary>处理器持有类：热更委托不进 CLR 泛型集合（03c H1）。宿主内部用，mod 不需要直接碰。</summary>
+        </member>
+        <member name="T:Yx.Shared.HookRegistry">
+            <summary>钩子登记表：按 (类型全名, 方法名, 参数个数) 建站点，处理器带 owner，停用时按 owner 清理。仅主线程使用。</summary>
+        </member>
+        <member name="T:Yx.Shared.HookDispatchCore">
+            <summary>
+            分发核心：遍历站点处理器。处理器的异常在本方法内直接捕获（不经过闭包与委托层再抛出），
+            通过 onError(owner, what, exception) 交给宿主记账。前置返回 false 或调用 Skip 即跳过原方法。
+            </summary>
+        </member>
+        <member name="T:Yx.Shared.SaturateJob">
+            <summary>
+            分帧执行的改写作业：大类型（BattleCharacter 有上千个方法）一口气在解释器里分析完会卡好几秒，
+            所以每帧只处理一定量的指令。由 ctx.Hooks.BeginSaturate 创建，StepSaturate 推进。
+            </summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateJob.Types">
+            <summary>要改写的类型全名，按这个顺序处理。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateJob.Total">
+            <summary>到目前为止累计的改写报告；<see cref="P:Yx.Shared.SaturateJob.Done"/> 之后就是整个作业的结果（<c>Total.Describe()</c> 适合直接写日志）。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateJob.TypeIndex">
+            <summary>下一个要处理的类型下标；等于 Types.Length 表示做完了。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateJob.MethodIndex">
+            <summary>当前类型里下一个要处理的方法下标。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateJob.Cursor">
+            <summary>宿主自己的游标（当前类型摊平后的方法表），调用方不要碰。</summary>
+        </member>
+        <member name="M:Yx.Shared.SaturateJob.#ctor(System.String[])">
+            <summary>一般用 <c>ctx.Hooks.BeginSaturate</c> 创建，不直接 new。</summary>
+            <param name="types">要改写的类型全名；null 按空数组处理（作业一开始就是 Done）。</param>
+        </member>
+        <member name="P:Yx.Shared.SaturateJob.Done">
+            <summary>全部类型都处理完了；之后不用再调 StepSaturate。</summary>
+        </member>
+        <member name="T:Yx.Shared.ConstPatchRequest">
+            <summary>常量覆盖的改写请求（Core → 绑定层）。</summary>
+        </member>
+        <member name="F:Yx.Shared.ConstPatchRequest.TypeName">
+            <summary>游戏热更类型的全名。</summary>
+        </member>
+        <member name="F:Yx.Shared.ConstPatchRequest.Method">
+            <summary>方法名。</summary>
+        </member>
+        <member name="F:Yx.Shared.ConstPatchRequest.ParamCount">
+            <summary>方法的参数个数（用来区分重载）。</summary>
+        </member>
+        <member name="F:Yx.Shared.ConstPatchRequest.Original">
+            <summary>游戏代码里那个常量现在的值。</summary>
+        </member>
+        <member name="F:Yx.Shared.ConstPatchRequest.FieldHint">
+            <summary>只改紧挨着读 / 写「名字里含这段文字的字段」的那几处；空 = 方法里所有等于 Original 的常量。</summary>
+        </member>
+        <member name="F:Yx.Shared.ConstPatchRequest.Slot">
+            <summary>ConstOverrides 的槽号。</summary>
+        </member>
+        <member name="T:Yx.Shared.SaturateReport">
+            <summary>一次饱和算术改写的结果（不依赖 Cecil，Core 与绑定层共用）。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateReport.Target">
+            <summary>要改写的类型 / 方法（调用方给的名字）。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateReport.Methods">
+            <summary>看过多少个方法。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateReport.Sites">
+            <summary>改写了多少处。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateReport.SkippedMethods">
+            <summary>分析不了、原样没动的方法数。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateReport.FirstSkip">
+            <summary>第一个被放弃的方法和原因（排错用）。</summary>
+        </member>
+        <member name="F:Yx.Shared.SaturateReport.Error">
+            <summary>整体失败的原因（找不到类型、宿主不支持……）；空 = 成功。</summary>
+        </member>
+        <member name="P:Yx.Shared.SaturateReport.Ok">
+            <summary>整体是否成功（<see cref="F:Yx.Shared.SaturateReport.Error"/> 为空）。成功不代表改到了东西，还要看 <see cref="F:Yx.Shared.SaturateReport.Sites"/>。</summary>
+        </member>
+        <member name="M:Yx.Shared.SaturateReport.Add(Yx.Shared.SaturateReport)">
+            <summary>把另一份报告累加进来：计数相加，FirstSkip / Error 只保留最先出现的那个。</summary>
+            <param name="other">要累加的报告；null 时什么都不做。</param>
+        </member>
+        <member name="M:Yx.Shared.SaturateReport.Describe">
+            <summary>一行中文摘要，适合直接写日志。</summary>
+            <returns>形如「目标：方法 N 个，改写 M 处」，有放弃的方法或失败原因时附在后面。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.ConfigRaiser">
+            <summary>
+            持有一个配置变更 raiser 的容器：ILRuntime 下把热更委托放进 CLR 泛型集合（Dictionary/List）
+            需要游戏未注册的委托适配器，因此用我们自己（热更）代码里的类持有委托，集合里存放这个持有者。
+            </summary>
+        </member>
+        <member name="T:Yx.ModSdk.EnumConfig">
+            <summary>枚举配置项与 Json 字符串互转的公共实现（ILRuntime 下不用 3 参数 Enum.Parse）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.EnumConfig.ToName(System.Type,System.Object)">
+            <summary>写路径：枚举值 → 名字。找不到命名成员（如自定义位组合）时退化为数值字符串，不记录日志。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.EnumConfig.TryParse(System.Type,System.String,System.Object@)">
+            <summary>
+            读路径：字符串 → 枚举值。先按名字忽略大小写匹配（2 参数 Enum.Parse，ILRuntime 不重定向 3 参数重载），
+            找不到再按数值字符串匹配 Enum.GetValues 的各项；都没有则返回 false。
+            </summary>
+        </member>
+        <member name="T:Yx.ModSdk.ModConfig">
+            <summary>
+            mod 的配置项（<c>ctx.Config</c>，主线程）。值由管理器读写 <c>config/&lt;modId&gt;.json</c>，启动时随运行计划下发、运行中改了即时下发；
+            游戏内不做文件读写。在 OnLoad 里 <see cref="M:Yx.ModSdk.ModConfig.Bind``1(System.String,System.String,``0,System.String)"/> 才会进配置 schema（管理器的配置表单按它生成）。
+            实机：PASS（冒烟 S10 默认值、S11 schema、S18 运行中下发，均含 enum）。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.ModConfig.Bind``1(System.String,System.String,``0,System.String)">
+             <summary>
+             声明一个配置项并拿到它的读写句柄。管理器已经下发过这个键的值（用户改过）就用下发的值，否则写入 defaultValue。
+             </summary>
+             <typeparam name="T">只支持 bool / int / float / string / 自定义 enum。enum 按成员名存储，管理器里显示成下拉选项。</typeparam>
+             <param name="section">分组名，管理器的配置表单按它分区（如 "general"）。"hotkeys" 留给 <c>ctx.Input</c> 用。</param>
+             <param name="key">分组内的键名；同一个 mod 里 section + key 不能重复。</param>
+             <param name="defaultValue">默认值。</param>
+             <param name="description">管理器配置表单里显示给用户看的标签 / 说明；null 按空串处理。</param>
+             <returns>配置项句柄，通常存成字段，用 <see cref="P:Yx.ModSdk.ConfigEntry`1.Value"/> 读当前值。</returns>
+             <exception cref="T:System.NotSupportedException">T 不是上面支持的类型。</exception>
+             <exception cref="T:System.InvalidOperationException">同一个 section + key 已经绑定过。</exception>
+             <example>
+             <code>
+             ConfigEntry&lt;int&gt; _count;
+            
+             public override void OnLoad(ModContext ctx)
+             {
+                 _count = ctx.Config.Bind("general", "count", 3, "问候次数");
+                 _count.OnChanged(OnCountChanged);
+             }
+            
+             void OnCountChanged(int value)
+             {
+                 Context.Log.Info("count " + value.ToString(CultureInfo.InvariantCulture));
+             }
+             </code>
+             </example>
+        </member>
+        <member name="T:Yx.ModSdk.ValueHandler`1">
+            <summary>持有一个 ConfigEntry 变更处理器的容器（见 ConfigRaiser 的注释，原因相同）。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.ConfigEntry`1">
+            <summary>
+            一个配置项的读写句柄，由 <c>ctx.Config.Bind</c> 返回（主线程）。它不缓存值：每次读 <see cref="P:Yx.ModSdk.ConfigEntry`1.Value"/> 都是当前值，
+            所以用户在管理器里改完立刻能读到，不订阅 <see cref="M:Yx.ModSdk.ConfigEntry`1.OnChanged(System.Action{`0})"/> 也行。
+            </summary>
+            <typeparam name="T">配置值类型：bool / int / float / string / enum。</typeparam>
+        </member>
+        <member name="P:Yx.ModSdk.ConfigEntry`1.Section">
+            <summary>Bind 时给的分组名。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ConfigEntry`1.Key">
+            <summary>Bind 时给的键名。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ConfigEntry`1.Value">
+            <summary>
+            当前值。读：按 T 转换存储里的值——管理器从 JSON 下发的数值是 double，会转成 int（四舍五入）/ float；
+            enum 按名字解析（大小写不敏感，也认数值字符串）；没有值或转换不了时返回 Bind 时的默认值，不抛异常。
+            写：值确实变了才生效——同步触发 <see cref="M:Yx.ModSdk.ConfigEntry`1.OnChanged(System.Action{`0})"/> 的回调，并发出 configChanged 事件由管理器写回 <c>config/&lt;modId&gt;.json</c>
+            （所以 mod 自己改的值也会持久化、也会显示在管理器里）；写入相同的值什么都不发生。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.ConfigEntry`1.OnChanged(System.Action{`0})">
+            <summary>
+            订阅这个配置项的变化：管理器下发新值或代码里写 <see cref="P:Yx.ModSdk.ConfigEntry`1.Value"/>，且值确实变了的时候，在主线程回调。
+            可以注册多个，按注册顺序调用。没有取消订阅的办法，回调跟着这个句柄活到 mod 停用 / 热重载（热重载会重新走 OnLoad、得到新的句柄）。
+            回调里抛的异常记 error 并计入错误预算。
+            </summary>
+            <param name="handler">参数是转换成 T 之后的新值（转换不了时是默认值）。</param>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+        </member>
+        <member name="T:Yx.ModSdk.ModContext">
+            <summary>
+            一个 mod 的全部 SDK 入口。由宿主创建并传给 <see cref="M:Yx.ModSdk.YxMod.OnLoad(Yx.ModSdk.ModContext)"/>，之后也能从 <see cref="P:Yx.ModSdk.YxMod.Context"/> 取到；
+            每次加载 / 热重载都是新的实例，不要跨实例缓存。除 <see cref="M:Yx.ModSdk.ModMainThread.Post(System.Action)"/> / <see cref="M:Yx.ModSdk.ModMainThread.Delay(System.Single,System.Action)"/> 外，全部成员只在 Unity 主线程使用。
+            </summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.ModId">
+            <summary>manifest.json 的 id。日志来源、热键 / 订阅 / 服务 / 钩子的归属都用它；不会以 <c>yx.</c> 开头（宿主保留）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Version">
+            <summary>本 mod 自己的版本（manifest.json 的 version；没写为空串）。SDK 与游戏的版本看 <see cref="P:Yx.ModSdk.ModContext.Versions"/>。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Log">
+            <summary>日志：显示在管理器的日志页并写进会话日志文件，来源自动标成本 mod 的 id。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Config">
+            <summary>配置项：在 OnLoad 里 <c>Bind</c>，用户在管理器的配置表单里改，运行中即时下发。实机：PASS（冒烟 S10 / S11 / S18）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Input">
+            <summary>热键：注册后自动成为配置项 <c>hotkeys.&lt;id&gt;</c>，用户可在管理器改键。实机：PASS（冒烟 S12 / S14 / S20）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.MainThread">
+            <summary>主线程任务：下一帧执行、延时执行、每帧执行。实机：PASS（冒烟 S13）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Services">
+            <summary>跨 mod 共享对象（按类型全名登记）。实机：PASS（冒烟 S12）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Events">
+            <summary>游戏事件订阅：回合、战斗开始 / 结束、手牌变化、收发的协议消息。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Hooks">
+            <summary>
+            给游戏热更方法挂前置 / 后置钩子，以及饱和算术改写、常量覆盖。
+            实机：Prefix / Postfix 全过（03f H01–H14）；饱和算术与常量覆盖的改写步骤已在练习场跑通，数值效果待确认。
+            </summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Data">
+            <summary>mod 自有的持久化键值对（由管理器落盘到 <c>data/&lt;id&gt;.json</c>）。实机：PASS（09-19 冒烟 S24，含热重载保留）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModContext.Versions">
+            <summary>SDK 版本与游戏版本。实机：PASS（09-19 冒烟 S24）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.ModContext.Guard(System.String,System.Action)">
+            <summary>
+            立刻执行一段代码，异常不往外抛：接住、记一条 error、计入这个 mod 的错误预算（和热键 / 事件回调里出错一样）。
+            用在「不经过 SDK 的回调」里——Unity 按钮的 onClick、输入框的 onEndEdit、UniRx 订阅：那里抛的异常会漏进游戏。主线程。
+            </summary>
+            <param name="what">这段代码是干什么的，出现在错误日志里（如「点击发牌」）。</param>
+            <param name="action">要执行的代码。</param>
+            <exception cref="T:System.ArgumentNullException">action 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModContext.Guarded(System.String,System.Action)">
+            <summary>
+            把一个回调包成「出错也不往外抛」的版本，拿去交给 Unity / 游戏（按钮、UniRx……）。见 <see cref="M:Yx.ModSdk.ModContext.Guard(System.String,System.Action)"/>。
+            <see cref="T:Yx.ModSdk.Unity.UiKit"/> 建的按钮和输入框已经自动包过了，不用再包。
+            <example><code>
+            button.onClick.AddListener(new UnityAction(ctx.Guarded("点击发牌", OnDeal)));
+            </code></example>
+            </summary>
+            <param name="what">这个回调是干什么的，出现在错误日志里。</param>
+            <param name="action">原来的回调。</param>
+            <returns>包好的委托。留一份引用在自己的字段里（交给 Unity 的只是跨域适配器）。</returns>
+            <exception cref="T:System.ArgumentNullException">action 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModContext.Guarded``1(System.String,System.Action{``0})">
+            <summary>带一个参数的 <see cref="M:Yx.ModSdk.ModContext.Guarded(System.String,System.Action)"/>（输入框的 onEndEdit 之类）。</summary>
+            <param name="what">这个回调是干什么的，出现在错误日志里。</param>
+            <param name="action">原来的回调。</param>
+            <returns>包好的委托。</returns>
+            <exception cref="T:System.ArgumentNullException">action 为 null。</exception>
+        </member>
+        <member name="T:Yx.ModSdk.ModLog">
+            <summary>
+            mod 的日志出口（<c>ctx.Log</c>，主线程）。写进宿主的日志缓冲，管理器定期取走，显示在日志页并追加到本次启动的会话日志文件；
+            每条自动带来源（本 mod 的 id）和级别（debug / info / warn / error）。缓冲容量 5000 条，管理器来不及取时新日志会被丢弃。
+            写日志本身不计入错误预算（主动抛出的异常才计）。message 为 null 按空串处理，不抛异常。
+            </summary>
+            <example>
+            <code>
+            ctx.Log.Info("loaded v" + ctx.Version);
+            try { DoWork(); }
+            catch (Exception e) { ctx.Log.Error("DoWork 失败", e); }
+            </code>
+            </example>
+        </member>
+        <member name="M:Yx.ModSdk.ModLog.Debug(System.String)">
+            <summary>调试级：排错用的细节。</summary>
+            <param name="message">日志正文；拼接时数字先 <c>ToString(CultureInfo.InvariantCulture)</c>（ILRuntime 约束）。</param>
+        </member>
+        <member name="M:Yx.ModSdk.ModLog.Info(System.String)">
+            <summary>信息级：正常的进度 / 状态。</summary>
+            <param name="message">日志正文。</param>
+        </member>
+        <member name="M:Yx.ModSdk.ModLog.Warn(System.String)">
+            <summary>警告级：出了问题但 mod 还能继续。</summary>
+            <param name="message">日志正文。</param>
+        </member>
+        <member name="M:Yx.ModSdk.ModLog.Error(System.String)">
+            <summary>错误级：只写日志，不会让 mod 被停用。</summary>
+            <param name="message">日志正文。</param>
+        </member>
+        <member name="M:Yx.ModSdk.ModLog.Error(System.String,System.Exception)">
+            <summary>错误级，并在正文后面附上异常的「类型名: Message」（不含堆栈）。</summary>
+            <param name="message">日志正文。</param>
+            <param name="exception">要附带的异常；null 时只写 message。</param>
+        </member>
+        <member name="T:Yx.ModSdk.ModMainThread">
+             <summary>
+             主线程任务（<c>ctx.MainThread</c>）。任务在每帧最前面的「任务队列」阶段执行（早于热键、场景轮询和 OnUpdate）；
+             任务里抛的异常记 error 并计入本 mod 的错误预算；mod 停用 / 热重载时还没执行的任务全部丢弃。实机：PASS（冒烟 S13）。
+             </summary>
+             <example>
+             <code>
+             ISubscription _tick;
+            
+             public override void OnLoad(ModContext ctx)
+             {
+                 ctx.MainThread.Delay(2.0f, SayLater);
+                 _tick = ctx.MainThread.EveryFrame(EachFrame);
+             }
+            
+             void SayLater() { Context.Log.Info("2 秒到了"); }
+             void EachFrame() { if (_finished) _tick.Cancel(); }
+             </code>
+             </example>
+        </member>
+        <member name="M:Yx.ModSdk.ModMainThread.Post(System.Action)">
+            <summary>投递到下一帧的主线程执行（可在任意线程调用）。从后台线程回到主线程就用它。</summary>
+            <param name="action">要执行的任务。</param>
+            <exception cref="T:System.ArgumentNullException">action 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModMainThread.Delay(System.Single,System.Action)">
+            <summary>
+            约 seconds 秒后在主线程执行一次（可在任意线程调用）。计时从宿主下一帧收到任务时开始，到点后的那一帧执行，所以只会晚不会早。
+            没有单独取消的办法，只会随 mod 停用一起丢弃；需要可取消的就用 <see cref="M:Yx.ModSdk.ModMainThread.EveryFrame(System.Action)"/> 自己计时。
+            </summary>
+            <param name="seconds">延时秒数；小于等于 0 等同于 <see cref="M:Yx.ModSdk.ModMainThread.Post(System.Action)"/>。</param>
+            <param name="action">要执行的任务。</param>
+            <exception cref="T:System.ArgumentNullException">action 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModMainThread.EveryFrame(System.Action)">
+            <summary>每帧执行一次，直到取消或 mod 停用（仅主线程调用）。</summary>
+            <param name="action">每帧要执行的任务。</param>
+            <returns>订阅句柄：<see cref="M:Yx.Shared.ISubscription.Cancel"/> 停止；mod 停用 / 热重载时宿主自动取消。</returns>
+            <exception cref="T:System.ArgumentNullException">action 为 null。</exception>
+        </member>
+        <member name="T:Yx.ModSdk.ModServices">
+             <summary>
+             跨 mod 共享对象（<c>ctx.Services</c>，主线程）。键是 <c>typeof(T).FullName</c>，每个类型全局只能有一个注册；
+             注册归属于注册它的 mod，该 mod 停用 / 热重载时自动注销。提供方和使用方必须用同一个类型定义：
+             把类型放在提供方的 DLL 里，使用方引用那个 DLL（各自定义一个同名类型拿不到对方的对象）。实机：PASS（冒烟 S12）。
+             </summary>
+             <example>
+             <code>
+             // 提供方 mod 的 OnLoad（GreeterService 定义在提供方 DLL 里）
+             ctx.Services.Register&lt;GreeterService&gt;(new GreeterService());
+            
+             // 使用方 mod：用到时再取，提供方没加载或已停用时拿不到
+             GreeterService greeter;
+             if (Context.Services.TryGet&lt;GreeterService&gt;(out greeter)) greeter.Greet("hi");
+             </code>
+             </example>
+        </member>
+        <member name="M:Yx.ModSdk.ModServices.Register``1(``0)">
+            <summary>把一个对象登记为类型 T 的服务，其它 mod 用 <c>Get&lt;T&gt;()</c> 取到的就是这个对象。</summary>
+            <typeparam name="T">服务类型（引用类型）。用热更代码里自己定义的类；不要用 CLR 接口（ILRuntime 约束）。</typeparam>
+            <param name="implementation">服务对象。</param>
+            <exception cref="T:System.ArgumentNullException">implementation 为 null。</exception>
+            <exception cref="T:System.InvalidOperationException">类型 T 已经有人注册了（包括自己重复注册）；消息里带注册者的 mod id。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModServices.Get``1">
+            <summary>取类型 T 的服务。</summary>
+            <typeparam name="T">服务类型，要和提供方注册时用的是同一个类型定义。</typeparam>
+            <returns>服务对象；没人注册（提供方没加载、已停用、或加载顺序在后）时返回 null，不抛异常。</returns>
+            <remarks>提供方停用后注册会被注销，但你手里已经拿到的引用不会跟着清掉；建议每次用到时再取，不要在 OnLoad 里取一次长期存着。</remarks>
+        </member>
+        <member name="M:Yx.ModSdk.ModServices.TryGet``1(``0@)">
+            <summary><c>Get&lt;T&gt;()</c> 的 Try 形式。</summary>
+            <typeparam name="T">服务类型。</typeparam>
+            <param name="implementation">取到的服务对象；没有时为 null。</param>
+            <returns>取到返回 true，没人注册返回 false。</returns>
+        </member>
+        <member name="T:Yx.ModSdk.NetHandler`1">
+            <summary>
+            协议消息的类型过滤持有者。用泛型类的实例方法而不是泛型方法里的闭包：ILRuntime 对泛型方法
+            display class 中的 as T / is T 处理不可靠（03d 冒烟 S19 中回调静默不触发），而泛型类里的
+            (T) 强转在 ConfigEntry&lt;T&gt; 上已实机验证。类型不匹配时只记一次 debug 日志。
+            </summary>
+        </member>
+        <member name="T:Yx.ModSdk.ModEvents">
+             <summary>
+             游戏事件订阅（<c>ctx.Events</c>，主线程）。回调都在主线程执行，抛的异常记 error 并计入本 mod 的错误预算；
+             每个方法都返回 <see cref="T:Yx.Shared.ISubscription"/>，可以提前 Cancel，mod 停用 / 热重载时宿主自动取消，不必自己存。
+             回合 / 战斗 / 手牌事件来自宿主每 0.5 秒一次的轮询，最多滞后约 0.5 秒；协议消息在收发后由宿主排到主线程的下一帧送达。
+             测试里用 <c>TestHost.Publish(Topics.Round, 3)</c> 这样的方式模拟（话题常量在 Yx.ModSdk.Hosting.Topics）。
+             </summary>
+             <example>
+             <code>
+             public override void OnLoad(ModContext ctx)
+             {
+                 ctx.Events.OnRoundStarted(OnRound);
+             }
+            
+             void OnRound(int round)
+             {
+                 Context.Log.Info("round " + round.ToString(CultureInfo.InvariantCulture));
+             }
+             </code>
+             </example>
+        </member>
+        <member name="M:Yx.ModSdk.ModEvents.OnRoundStarted(System.Action{System.Int32})">
+            <summary>
+            回合号变化时回调：在摆牌 / 战斗场景下，对局状态里的 round 和上一次看到的不一样就触发，
+            所以进入对局后第一次识别到回合号时也会触发一次（离开对局时记忆清空）。
+            </summary>
+            <param name="handler">参数是新的回合号（和 <c>StateApi.Round()</c> 同一个值）。</param>
+            <returns>订阅句柄；停用时自动取消。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModEvents.OnBattleStarted(System.Action)">
+            <summary>战斗开始：场景从 <see cref="F:Yx.ModSdk.GameScene.Placement"/> 变成 <see cref="F:Yx.ModSdk.GameScene.Battle"/> 时回调（mod 在战斗中途才加载的话，这一场不会补发）。</summary>
+            <param name="handler">无参数回调。</param>
+            <returns>订阅句柄；停用时自动取消。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModEvents.OnBattleEnded(System.Action)">
+            <summary>战斗结束：场景从 <see cref="F:Yx.ModSdk.GameScene.Battle"/> 变成别的已识别场景（回到摆牌、回大厅等）时回调。</summary>
+            <param name="handler">无参数回调。</param>
+            <returns>订阅句柄；停用时自动取消。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModEvents.OnHandChanged(System.Action{System.Collections.Generic.IList{System.Int32}})">
+            <summary>
+            摆牌阶段手牌变化时回调：手牌的卡牌 id 序列（含顺序）和上一次不一样就触发；离开摆牌阶段时记忆清空。
+            每个订阅者拿到的是发布列表的独立拷贝，互不影响、也不会被后续发布复用同一个引用。
+            </summary>
+            <param name="handler">
+            参数是按手牌顺序排列的卡牌 id 列表（和 <c>PlacementApi.HandIds()</c> 同一份数据，下标就是 handIdx）。
+            只有测试里用 TestHost.Publish 发了不是 <c>IList&lt;int&gt;</c> 的载荷时才会收到 null。
+            </param>
+            <returns>订阅句柄；停用时自动取消。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModEvents.OnNetIn``1(System.Action{``0})">
+            <summary>
+            订阅服务器发来的协议消息。只有运行时类型能转成 T 的消息会回调，其余的静默跳过（第一次不匹配时记一条 debug 日志）。
+            消息由宿主排队到主线程的下一帧再回调；拿到的是游戏自己的消息对象，只读不要改。
+            实机：PASS（冒烟 S19，用的是 T = object）。
+            </summary>
+            <typeparam name="T">游戏的协议类型（<c>Proto.*</c>，如 <c>Proto.GameStatus</c>）。写 object 会收到全部消息，会拖慢游戏，只用于调试。</typeparam>
+            <param name="handler">参数是收到的消息，不会是 null。</param>
+            <returns>订阅句柄；停用时自动取消。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModEvents.OnNetOut``1(System.Action{``0})">
+            <summary>订阅客户端发出的协议消息；类型过滤、线程和生命周期与 <c>OnNetIn</c> 相同。只是旁观，没有拦截或改写发包的入口。</summary>
+            <typeparam name="T">游戏的协议类型（<c>Proto.*</c>）。</typeparam>
+            <param name="handler">参数是发出的消息，不会是 null。</param>
+            <returns>订阅句柄；停用时自动取消。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+        </member>
+        <member name="T:Yx.ModSdk.DataConvert`1">
+            <summary>类型转换放在泛型类里（泛型方法里对 T 的转换在 ILRuntime 下不可靠，见 CLAUDE.md）。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.ModData">
+            <summary>
+            mod 自有持久化（<c>ctx.Data</c>，主线程）：键值对，值限 JSON 可表示类型（bool/int/long/float/double/string/List&lt;object&gt;/Dictionary&lt;string, object&gt;），
+            单 mod 上限 256 KB。Get 返回的容器是拷贝；Set(key, null) 等价于 Remove。
+            改动经 dataChanged 事件交给管理器落盘（<c>data/&lt;id&gt;.json</c>），启动/热重载时随运行计划下发；游戏内不做文件读写。
+            和 <c>ctx.Config</c> 的区别：这里的数据不进配置表单，用户看不到也改不了，适合存计数、上次状态之类。
+            实机：PASS（09-19 冒烟 S24：往返 + 热重载后保留）。
+            </summary>
+            <example>
+            <code>
+            int runs = ctx.Data.Get&lt;int&gt;("runs", 0);
+            ctx.Data.Set("runs", runs + 1);
+            if (ctx.Data.Has("legacyKey")) ctx.Data.Remove("legacyKey");
+            </code>
+            </example>
+        </member>
+        <member name="P:Yx.ModSdk.ModData.Keys">
+            <summary>当前全部键的快照（新数组，顺序不保证）；没有数据时是空数组，不会是 null。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.ModData.Has(System.String)">
+            <summary>这个键现在有没有值。</summary>
+            <param name="key">键名；null 返回 false。</param>
+            <returns>存在返回 true。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.ModData.Get``1(System.String,``0)">
+            <summary>读一个值。JSON 数值下发时是 double（重启 / 热重载之后读到的就是这种），会按 T 转换，所以 <c>Get&lt;int&gt;</c> 可以放心用。</summary>
+            <typeparam name="T">期望的类型：bool / int / long / float / double / string / <c>List&lt;object&gt;</c> / <c>Dictionary&lt;string, object&gt;</c>。</typeparam>
+            <param name="key">键名。</param>
+            <param name="defaultValue">键不存在（或 key 为 null）、或存的值转不成 T 时返回它。</param>
+            <returns>存储值的拷贝（容器是深拷贝，改它不影响存储，要保存得再 <see cref="M:Yx.ModSdk.ModData.Set(System.String,System.Object)"/> 一次）；缺失或无法转换时返回 defaultValue，不抛异常。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.ModData.Set(System.String,System.Object)">
+            <summary>写一个值（存进去的是深拷贝），并立刻发 dataChanged 事件交给管理器落盘。频繁变化的数据不要每帧写。</summary>
+            <param name="key">键名，不能为 null 或空串。</param>
+            <param name="value">bool / int / long / float / double / string / <c>List&lt;object&gt;</c> / <c>Dictionary&lt;string, object&gt;</c>（容器里递归同样限制）；null 等价于 <see cref="M:Yx.ModSdk.ModData.Remove(System.String)"/>。</param>
+            <exception cref="T:System.ArgumentException">key 为空，或 value（含容器里的元素）不是支持的类型，例如 <c>List&lt;int&gt;</c>、自定义类、数组。</exception>
+            <exception cref="T:System.InvalidOperationException">写入后本 mod 的全部数据序列化超过 256 KB；这次写入不生效。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.ModData.Remove(System.String)">
+            <summary>删除一个键并通知管理器；键不存在（或为 null）时什么都不做，不抛异常。</summary>
+            <param name="key">键名。</param>
+        </member>
+        <member name="T:Yx.ModSdk.GuardedAction">
+            <summary>
+            给「不经过 SDK 的回调」兜底。热键、事件、主线程任务、钩子处理器里抛的异常，宿主都会接住、记一条 error 并计入这个 mod 的
+            错误预算；但 Unity 按钮的 onClick、输入框的 onEndEdit、UniRx 订阅这类回调是 Unity / 游戏直接调过来的，异常会漏到游戏里
+            （轻则这次点击没反应、重则打断游戏自己的流程），而且日志里看不出是哪个 mod。用 <c>ctx.Guarded(...)</c> 包一层就和别的回调一样了。
+            mod 一般不直接用这个类，用 <c>ctx.Guard</c> / <c>ctx.Guarded</c>。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.GuardedAction.#ctor(System.String,System.String,System.Action)">
+            <param name="owner">mod id（异常记在它头上）。</param>
+            <param name="what">这个回调是干什么的，出现在错误日志里（如「点击发牌」）。</param>
+            <param name="action">真正要执行的代码。</param>
+        </member>
+        <member name="M:Yx.ModSdk.GuardedAction.Invoke">
+            <summary>执行；异常被接住并记到 mod 头上（计入错误预算），不再往外抛。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.GuardedAction`1">
+            <summary>带一个参数的 <see cref="T:Yx.ModSdk.GuardedAction"/>（输入框的 onEndEdit 之类）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.GuardedAction`1.#ctor(System.String,System.String,System.Action{`0})">
+            <param name="owner">mod id。</param>
+            <param name="what">这个回调是干什么的。</param>
+            <param name="action">真正要执行的代码。</param>
+        </member>
+        <member name="M:Yx.ModSdk.GuardedAction`1.Invoke(`0)">
+            <summary>执行；异常被接住并记到 mod 头上，不再往外抛。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.ModInput">
+            <summary>
+            热键（<c>ctx.Input</c>，主线程）。全部 mod 共用一张占用表，同一个组合键只能属于一个热键；
+            每个热键自动成为配置项 <c>hotkeys.&lt;id&gt;</c>（类型 hotkey），用户在管理器里改键后即时生效；mod 停用 / 热重载时自动注销。
+            实机：PASS（冒烟 S12 触发、S14 登记、S20 停用后清理）。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.ModInput.RegisterHotkey(System.String,System.String,System.Action)">
+             <summary>
+             注册热键。实际绑定用的是用户在管理器里保存过的组合（配置 hotkeys.&lt;id&gt;），没有才用 defaultBinding。
+             按下的那一帧触发一次（按住不连发），修饰键必须完全一致（绑的是 "F8" 时按 Ctrl+F8 不触发）；回调在主线程执行，异常计入错误预算。
+             </summary>
+             <param name="id">热键 id，本 mod 内唯一；同时是配置键名 <c>hotkeys.&lt;id&gt;</c>。</param>
+             <param name="defaultBinding">
+             默认组合，如 "F8"、"Ctrl+Shift+D"（大小写不敏感，用 + 连接，修饰键 Ctrl / Shift / Alt）。
+             可用键：A–Z、0–9、F1–F15、TAB、SPACE、ENTER、ESC、UP / DOWN / LEFT / RIGHT、BACKQUOTE、MOUSE0–MOUSE2；
+             写了不认识的键名不报错，只是永远不触发。null 或空串表示默认不绑定，等用户自己设。
+             </param>
+             <param name="callback">按下时调用。</param>
+             <returns>
+             true = 已生效。false = 这个组合已被别的热键（可能是别的 mod）占用：记一条 warn、发 hotkeyConflict 事件，
+             本热键登记为「未绑定」、暂不生效，直到用户在管理器里改成没被占用的组合。之后用户改键又撞车时保持原来的组合不变。
+             </returns>
+             <exception cref="T:System.ArgumentNullException">callback 为 null。</exception>
+             <exception cref="T:System.InvalidOperationException">同一个 id 注册了两次。</exception>
+             <example>
+             <code>
+             public override void OnLoad(ModContext ctx)
+             {
+                 bool ok = ctx.Input.RegisterHotkey("greet", "Ctrl+F8", Greet);
+                 if (!ok) ctx.Log.Warn("Ctrl+F8 被占用了，请在管理器里给 greet 换一个键");
+             }
+            
+             void Greet() { Context.Log.Info("hi"); }
+             </code>
+             </example>
+        </member>
+        <member name="M:Yx.ModSdk.ModInput.GetBinding(System.String)">
+            <summary>读某个热键当前生效的组合，用来在界面 / 提示里显示「按 F8 ……」。</summary>
+            <param name="id">注册时用的热键 id（只查本 mod 的）。</param>
+            <returns>
+            规范化后的组合：全大写、修饰键按 CTRL+SHIFT+ALT 排在前面，如 "CTRL+SHIFT+D"。
+            没注册过这个 id、注册时撞车而未生效、或本来就没绑定时返回空串，不会是 null。
+            </returns>
+        </member>
+        <member name="T:Yx.ModSdk.ModVersions">
+            <summary>
+            运行环境的版本（<c>ctx.Versions</c>）；本 mod 自己的版本是 <c>ctx.Version</c>。用来在游戏更新后做兼容判断或写进日志。
+            实机：PASS（09-19 冒烟 S24：sdk=1.0.0、game=1.7.3）。
+            </summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModVersions.Sdk">
+            <summary>SDK 版本（<c>SdkRuntime.SdkVersion</c>，当前 "1.0.0"）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.ModVersions.Game">
+            <summary>游戏版本（Application.version）；测试宿主可指定；未知为空串。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.GameScene">
+            <summary>
+            宿主识别出的游戏场景。依据是游戏自己的 <c>SceneLoader.currentSceneName</c> 与 <c>BattleManager.currentScene</c>
+            （见 Yx.ModSdk.Unity.SceneDetector.Detect），宿主每 0.5 秒轮询一次。
+            ILRuntime 下不要对它调 ToString()，要打印先强转成 int。实机：PASS（冒烟 S16、03e 组 1）。
+            </summary>
+        </member>
+        <member name="F:Yx.ModSdk.GameScene.Unknown">
+            <summary>
+            还认不出来：场景加载过渡中、进了对局场景但还没有对局状态、正在选角色，或识别时出错。
+            宿主不会把它传给 <see cref="M:Yx.ModSdk.YxMod.OnSceneChanged(Yx.ModSdk.GameScene)"/>，也不会因为它触发对局开始 / 结束事件。
+            </summary>
+        </member>
+        <member name="F:Yx.ModSdk.GameScene.Lobby">
+            <summary>游戏的 Lobby 场景（大厅）。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.GameScene.Placement">
+            <summary>对局中的修炼阶段（游戏的 <c>SceneType.修炼阶段</c>，摆牌）。对局里只要不是斗法阶段都算这里；已知结算画面也识别为 Placement。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.GameScene.Battle">
+            <summary>对局中的斗法阶段（游戏的 <c>SceneType.斗法阶段</c>，播放战斗）。</summary>
+        </member>
+        <member name="F:Yx.ModSdk.GameScene.Home">
+            <summary>游戏的 Home 场景（启动后先到这里，再进 Lobby）。停在这里不会触发 <see cref="M:Yx.ModSdk.YxMod.OnGameReady"/>。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.YxMod">
+             <summary>
+             mod 入口基类。manifest.json 的 entryType 写继承本类的完整类名，该类需要公共无参构造函数。
+             所有回调都在 Unity 主线程执行；回调抛出的异常会被记成 error 日志并计入错误预算，
+             60 秒内第 5 次出错的 mod 会被自动停用（状态 failed）。实机：PASS（冒烟 S07–S21，含软停用与热重载）。
+             </summary>
+             <example>
+             一个最小的 mod：
+             <code>
+             public sealed class ModMain : YxMod
+             {
+                 ConfigEntry&lt;int&gt; _count;
+            
+                 public override void OnLoad(ModContext ctx)
+                 {
+                     _count = ctx.Config.Bind("general", "count", 3, "问候次数");
+                     ctx.Input.RegisterHotkey("greet", "F8", Greet);
+                     ctx.Log.Info("loaded v" + ctx.Version);
+                 }
+            
+                 void Greet()
+                 {
+                     Context.Log.Info("hello x" + _count.Value.ToString(CultureInfo.InvariantCulture));
+                 }
+             }
+             </code>
+             </example>
+        </member>
+        <member name="P:Yx.ModSdk.YxMod.Context">
+            <summary>
+            本 mod 的上下文，和 <see cref="M:Yx.ModSdk.YxMod.OnLoad(Yx.ModSdk.ModContext)"/> 的参数是同一个对象。宿主在调用 OnLoad 之前赋值，所以构造函数里它还是 null。
+            约定：OnLoad 里用参数 ctx，其余回调和私有方法用 Context。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.YxMod.OnLoad(Yx.ModSdk.ModContext)">
+            <summary>
+            加载时调用一次：在这里绑定配置、注册热键、订阅事件、注册服务、登记钩子。
+            返回后宿主上报一次配置 schema，之后再 Bind 的配置项不会出现在管理器的配置表单里。
+            </summary>
+            <param name="ctx">本 mod 的上下文（之后也能从 <see cref="P:Yx.ModSdk.YxMod.Context"/> 取到）。</param>
+            <remarks>
+            抛异常视为加载失败：状态 failed，已注册的热键 / 订阅 / 任务 / 服务 / 钩子被清掉，
+            并且会调用一次 <see cref="M:Yx.ModSdk.YxMod.OnDisable"/>（此时 OnLoad 可能只跑了一半，OnDisable 里用到的字段要判空）。
+            </remarks>
+        </member>
+        <member name="M:Yx.ModSdk.YxMod.OnGameReady">
+            <summary>
+            首次进入大厅或对局（识别到 <see cref="F:Yx.ModSdk.GameScene.Lobby"/> / <see cref="F:Yx.ModSdk.GameScene.Placement"/> / <see cref="F:Yx.ModSdk.GameScene.Battle"/>）时调用一次；
+            加载 / 热重载时若游戏已就绪会立即补调。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.YxMod.OnSceneChanged(Yx.ModSdk.GameScene)">
+            <summary>
+            场景变化时调用。宿主每 0.5 秒轮询一次，所以最多滞后约 0.5 秒；同一场景不重复通知；
+            加载 / 热重载时若已经识别出场景会立即补调一次。
+            </summary>
+            <param name="scene">新场景。不会是 <see cref="F:Yx.ModSdk.GameScene.Unknown"/>（加载过渡期间不通知）。</param>
+        </member>
+        <member name="M:Yx.ModSdk.YxMod.OnUpdate">
+            <summary>每帧调用。不需要时不要覆写。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.YxMod.OnDisable">
+            <summary>
+            被停用（管理器软停用、错误熔断、加载失败）或热重载前调用：销毁自己创建的界面对象。
+            热键、事件订阅、主线程任务、服务、钩子处理器由宿主自动清理（调用本方法之前清一次、之后再清一次），不必手动 Cancel；
+            常量覆盖（ConstOverride）不在自动清理之列，用了就在这里 Disable()。这里抛出的异常只记 warn，不影响停用。
+            </summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hosting.SdkRuntime">
+            <summary>
+            运行时单例。Core 只依赖 BCL；游戏绑定层（Yx.ModSdk 的 GameRuntime.Install）与测试宿主（Yx.ModSdk.Testing）
+            通过 HookInstaller / GameVersion 两个接缝接入。mod 作者一般不需要直接使用。
+            </summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hosting.SdkRuntime.HookInstaller">
+            <summary>钩子安装接缝：给站点做 IL 重写。游戏内由 GameRuntime.Install 设置；未设置时 ctx.Hooks 抛异常。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hosting.SdkRuntime.Saturator">
+            <summary>
+            饱和算术改写的接缝（绑定层填 SaturateInstaller.Apply）：(类型全名, 方法名或 null = 整个类型, 参数个数) → 报告。
+            没有宿主支持时为 null。
+            </summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hosting.SdkRuntime.SaturatorStep">
+            <summary>分帧版：(作业, 这一步最多处理多少条指令) → 是否全部做完。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hosting.SdkRuntime.ConstPatcher">
+            <summary>常量覆盖的改写器（绑定层填）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hosting.SdkRuntime.GameVersion">
+            <summary>游戏版本；游戏内由 GameRuntime.Install 填，测试宿主可指定，未知为空串。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hosting.SdkRuntime.ResetForTesting">
+            <summary>测试宿主用：清空全部静态状态，让下一个 TestHost 重新 Initialize。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.ConstOverrides">
+            <summary>
+            可以在运行时改的「整数常量」。被 ConstRewriter 改写过的游戏代码在装载那个常量之后紧跟着 call <see cref="M:Yx.ModSdk.Hooks.ConstOverrides.Get(System.Int32,System.Int32)"/>
+            （和 HookDispatch / SatMath 一样，按类型全名在热更域里解析，所以签名不能随便改）：
+            这个槽开着就返回槽里的值，关着就原样返回游戏自己的常量——所以改写本身不改变任何行为，随时可以关回去。
+            只在主线程用（热更域本来就只在主线程进）。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverrides.Register">
+            <summary>要一个新槽（初始是关着的）。mod 一般不直接调：<c>ctx.Hooks.OverrideConstant</c> 会替你要槽并包成 <see cref="T:Yx.ModSdk.Hooks.ConstOverride"/>。</summary>
+            <returns>槽号（从 0 递增，不回收）。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverrides.Set(System.Int32,System.Int32)">
+            <summary>给槽设值并打开它：此后被改写的游戏代码读到 value。</summary>
+            <param name="id"><see cref="M:Yx.ModSdk.Hooks.ConstOverrides.Register"/> 返回的槽号。</param>
+            <param name="value">要让游戏读到的值。</param>
+            <exception cref="T:System.ArgumentOutOfRangeException">id 不是已分配的槽号。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverrides.Disable(System.Int32)">
+            <summary>关掉槽：游戏重新读到自己原来的常量。id 无效时什么都不做。</summary>
+            <param name="id">槽号。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverrides.IsEnabled(System.Int32)">
+            <summary>槽现在是不是开着。</summary>
+            <param name="id">槽号。</param>
+            <returns>开着返回 true；关着或 id 无效返回 false。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverrides.Get(System.Int32,System.Int32)">
+            <summary>被改写过的游戏代码调这里；mod 不需要调。</summary>
+            <param name="original">游戏代码里原来的常量。</param>
+            <param name="id">槽号。</param>
+            <returns>槽开着返回槽里的值，否则（含 id 无效）原样返回 original。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverrides.Reset">
+            <summary>全部关掉并清空（SdkRuntime 重新初始化 / 测试之间）。已经改写进游戏代码的槽号此后一律返回原值。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.ConstOverride">
+            <summary>
+            <c>ctx.Hooks.OverrideConstant</c> 的返回值：改写结果 + 这个常量的开关（主线程）。
+            注意 mod 停用时宿主不会自动把它关掉（自动清理只管热键 / 订阅 / 任务 / 服务 / 钩子处理器）：
+            不想让覆盖值在停用后继续生效，就在 OnDisable 里调 <see cref="M:Yx.ModSdk.Hooks.ConstOverride.Disable"/>。
+            实机：改写这一步已在练习场跑通（2026-09-19），数值效果待确认。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverride.#ctor(System.Int32,Yx.Shared.SaturateReport)">
+            <summary>由 <c>ctx.Hooks.OverrideConstant</c> 创建，mod 不需要自己 new。</summary>
+            <param name="id">ConstOverrides 的槽号。</param>
+            <param name="report">这次改写的报告。</param>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.ConstOverride.Report">
+            <summary>改写报告：Sites = 改了几处装载这个常量的指令；Error 非空 = 没做成。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.ConstOverride.Applied">
+            <summary>改写成功、至少改到了一处。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.ConstOverride.Enabled">
+            <summary>覆盖值现在是否生效（<see cref="M:Yx.ModSdk.Hooks.ConstOverride.Set(System.Int32)"/> 之后为 true，<see cref="M:Yx.ModSdk.Hooks.ConstOverride.Disable"/> 之后为 false）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverride.Set(System.Int32)">
+            <summary>从现在起游戏读到的是这个值（下一次执行到那条指令时生效）。<see cref="P:Yx.ModSdk.Hooks.ConstOverride.Applied"/> 为 false 时什么都不做，不抛异常。</summary>
+            <param name="value">要让游戏读到的值。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ConstOverride.Disable">
+            <summary>关回去：游戏读到自己原来的常量。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.HookDispatch">
+            <summary>被重写后的 IL 调用的静态入口。签名固定，IlRuntimeAccess.DispatchRefs 按名字取 MethodDefinition。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.HookGroup">
+            <summary>
+            一组要么一起生效、要么就别用的钩子。<see cref="M:Yx.ModSdk.Hooks.ModHooks.Prefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})"/> 找不到方法会抛异常——在 OnLoad 里没接住，整个 mod 就加载失败；
+            而游戏一更新，某个方法改名是常事。用一组来装：哪个没挂上只记一条 warn、记进 <see cref="P:Yx.ModSdk.Hooks.HookGroup.Missing"/>，不抛；
+            装完看 <see cref="P:Yx.ModSdk.Hooks.HookGroup.Complete"/> 决定功能开不开（比如「离线保护的钩子不全就禁止进练习场」）。
+            <example><code>
+            HookGroup offline = ctx.Hooks.Group("离线保护");
+            offline.Prefix("CardPanel", "MoveToGrid", 2, OnMove);
+            offline.Postfix("CardPanel", "MoveToGrid", 2, OnMoved);
+            if (!offline.Complete) ctx.Log.Warn("功能已关闭，没挂上：" + offline.Missing);
+            </code></example>
+            停用 / 热重载时组里的钩子和其它钩子一样由宿主自动解除。只在主线程用。
+            </summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.HookGroup.Name">
+            <summary>这一组的名字（只用在日志里）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.HookGroup.Installed">
+            <summary>成功挂上的个数。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.HookGroup.Failed">
+            <summary>没挂上的个数。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.HookGroup.Complete">
+            <summary>到目前为止登记的全部挂上了（一个都没登记也算 true）。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.HookGroup.Missing">
+            <summary>没挂上的那些，形如 <c>CardPanel.MoveToGrid/2, BattleManager.PlayBattle/1</c>；全挂上了是空串。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.HookGroup.Prefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})">
+            <summary>同 <see cref="M:Yx.ModSdk.Hooks.ModHooks.Prefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})"/>，但不抛异常。</summary>
+            <returns>挂上了返回订阅；没挂上返回 null（原因已经记了 warn）。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.HookGroup.Postfix(System.String,System.String,System.Int32,System.Action{Yx.Shared.HookContext})">
+            <summary>同 <see cref="M:Yx.ModSdk.Hooks.ModHooks.Postfix(System.String,System.String,System.Int32,System.Action{Yx.Shared.HookContext})"/>，但不抛异常。</summary>
+            <returns>挂上了返回订阅；没挂上返回 null（原因已经记了 warn）。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.HookGroup.CancelAll">
+            <summary>提前解除这一组里的全部钩子（不调也行：停用时宿主会解除）。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.ModHooks">
+            <summary>ctx.Hooks：按 mod 归属登记钩子，停用/热重载时自动解除。找不到方法或无法重写时抛 InvalidOperationException。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.Prefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})">
+            <summary>
+            在一个游戏（热更）方法的入口挂处理器：能读改参数（<see cref="P:Yx.Shared.HookContext.Args"/>）、能跳过原方法（<see cref="M:Yx.Shared.HookContext.Skip(System.Object)"/>）。
+            处理器在原方法的调用线程上执行（目前验证过的都是主线程）；处理器里抛的异常由宿主接住并计入错误预算，原方法照常执行。
+            停用 / 热重载时自动解除。实机：PASS（03f H01–H14）。用法与限制见 docs/dev/hooks.md。
+            <example><code>
+            ctx.Hooks.Prefix("CardPanel", "MoveToGrid", 2, h =>
+            {
+                ctx.Log.Info("要把牌放到第 " + ((int)h.Args[1]).ToString(CultureInfo.InvariantCulture) + " 格");
+                return true;            // true = 继续执行原方法
+            });
+            </code></example>
+            </summary>
+            <param name="typeFullName">热更类型的全名（游戏的类型大多没有命名空间，如 <c>CardPanel</c>）。</param>
+            <param name="method">方法名。async 方法可以挂（后置在第一个 await 处触发）；泛型方法、值类型上的方法不行。</param>
+            <param name="paramCount">参数个数（用来区分重载）。</param>
+            <param name="handler">返回 true 继续执行原方法；返回 false 或调用了 <see cref="M:Yx.Shared.HookContext.Skip(System.Object)"/> 则跳过原方法。</param>
+            <returns>订阅；<see cref="M:Yx.Shared.ISubscription.Cancel"/> 提前解除（方法体保持改写状态，只是不再分发给你）。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+            <exception cref="T:System.InvalidOperationException">找不到类型 / 方法，或这个方法不能改写。OnLoad 里没接住会让 mod 加载失败——游戏更新后方法改名很常见，拿不准就用 <see cref="M:Yx.ModSdk.Hooks.ModHooks.TryPrefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})"/> 或 <see cref="M:Yx.ModSdk.Hooks.ModHooks.Group(System.String)"/>。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.Postfix(System.String,System.String,System.Int32,System.Action{Yx.Shared.HookContext})">
+            <summary>
+            在一个游戏（热更）方法返回之后挂处理器：能读改返回值（<see cref="P:Yx.Shared.HookContext.Result"/>）。原方法被前置跳过时后置照常执行，
+            所以不能假定原方法真的跑过。其余同 <see cref="M:Yx.ModSdk.Hooks.ModHooks.Prefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})"/>。实机：PASS（03f H01–H14）。
+            </summary>
+            <param name="typeFullName">热更类型的全名。</param>
+            <param name="method">方法名。</param>
+            <param name="paramCount">参数个数（用来区分重载）。</param>
+            <param name="handler">处理器；改 <see cref="P:Yx.Shared.HookContext.Result"/> 就是改返回值。</param>
+            <returns>订阅。</returns>
+            <exception cref="T:System.ArgumentNullException">handler 为 null。</exception>
+            <exception cref="T:System.InvalidOperationException">找不到类型 / 方法，或这个方法不能改写。</exception>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.TryPrefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})">
+            <summary>
+            同 <see cref="M:Yx.ModSdk.Hooks.ModHooks.Prefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})"/>，但找不到方法 / 不能改写时不抛异常：记一条 warn、返回 null。
+            游戏一更新方法改名是常事；OnLoad 里没接住的异常会让整个 mod 加载失败，所以「挂不上就少一个功能」的钩子用这个。
+            一批钩子要么全有要么不用时，用 <see cref="M:Yx.ModSdk.Hooks.ModHooks.Group(System.String)"/>。
+            </summary>
+            <returns>挂上了返回订阅；没挂上返回 null。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.TryPostfix(System.String,System.String,System.Int32,System.Action{Yx.Shared.HookContext})">
+            <summary>同 <see cref="M:Yx.ModSdk.Hooks.ModHooks.Postfix(System.String,System.String,System.Int32,System.Action{Yx.Shared.HookContext})"/>，但不抛异常：没挂上记一条 warn、返回 null。见 <see cref="M:Yx.ModSdk.Hooks.ModHooks.TryPrefix(System.String,System.String,System.Int32,System.Func{Yx.Shared.HookContext,System.Boolean})"/>。</summary>
+            <returns>挂上了返回订阅；没挂上返回 null。</returns>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.Group(System.String)">
+            <summary>开一组钩子：组里的登记都不抛异常，装完看 <see cref="P:Yx.ModSdk.Hooks.HookGroup.Complete"/> / <see cref="P:Yx.ModSdk.Hooks.HookGroup.Missing"/>。</summary>
+            <param name="name">组名，只用在日志里（如「离线保护」）。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.Saturate(System.String)">
+            <summary>
+            把一个热更类型（含它的嵌套类型：async 状态机、闭包类）里的 32 位整数加 / 减 / 乘与「浮点 / 64 位 → int」的转换
+            改写成到顶就停（不回绕成负数）的版本。不可撤销：本次游戏进程内一直有效。不抛异常，结果看返回的报告。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.Saturate(System.String,System.String,System.Int32)">
+            <summary>只改一个方法（async 方法则改它的状态机）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.OverrideConstant(System.String,System.String,System.Int32,System.Int32,System.String)">
+            <summary>
+            让游戏方法里的一个整数常量可以在运行时覆盖（async 方法则改它的状态机）。改写本身不改变行为：
+            返回的 <see cref="T:Yx.ModSdk.Hooks.ConstOverride"/> 调 Set(value) 才生效，Disable() 关回原值。不抛异常，结果看 Report。
+            </summary>
+            <param name="typeFullName">热更类型的全名（游戏的类型大多没有命名空间，如 <c>BattleExecuter</c>）。</param>
+            <param name="method">方法名。</param>
+            <param name="paramCount">参数个数（用来区分重载）。</param>
+            <param name="original">游戏代码里那个常量现在的值。</param>
+            <param name="fieldHint">只改紧挨着读 / 写「名字里含这段文字的字段」的那几处；null / 空 = 方法里所有等于 original 的常量。</param>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.BeginSaturate(System.String[])">
+            <summary>分帧改写一批类型：每帧调一次 <see cref="M:Yx.ModSdk.Hooks.ModHooks.StepSaturate(Yx.Shared.SaturateJob,System.Int32)"/>，直到它返回 true。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.ModHooks.StepSaturate(Yx.Shared.SaturateJob,System.Int32)">
+            <summary>推进一步（最多处理 instructionBudget 条指令所在的那些方法）。返回是否全部做完；结果在 job.Total 里。</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Hooks.SatMath">
+             <summary>
+             饱和算术：结果超出 int 范围时钉在边界，不回绕。被 SaturateRewriter 改写过的游戏代码直接 call 这些方法
+             （和 HookDispatch 一样，按类型全名在热更域里解析），所以签名不能随便改。
+            
+             同时记下「真值」：一次运算溢出时，把按 64 位算出来的结果记在 <see cref="P:Yx.ModSdk.Hooks.SatMath.TrueValue"/> 里；之后的运算如果有一个操作数
+             正好等于被钉住的那个边界值，就认为它是那个被钉住的数、用真值接着往下算（伤害公式是一条链：乘倍率、加加成、减防……）。
+             这样虽然游戏里的 int 停在 2147483647，外面（伤害统计）还能拿到 64 位的真实结果。
+             这是启发式的：只跟一条链、只认「操作数恰好等于边界值」这一个信号；经过浮点再转回来的中间步骤会丢掉超出的部分
+             （浮点结果本身超界时照样会记）。只在主线程用（热更域本来就只在主线程进）。
+             </summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.SatMath.HasTrue">
+            <summary>最近一次溢出之后，那条运算链现在的真实值是否还有效。</summary>
+        </member>
+        <member name="P:Yx.ModSdk.Hooks.SatMath.Overflows">
+            <summary>累计发生过多少次溢出（看改写有没有起作用）。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.IsPinned(System.Int32)">
+            <summary>这个操作数是不是「被钉住的那个数」。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.Div(System.Int32,System.Int32)">
+            <summary>
+            除法本身不会溢出（int.MinValue / -1 除外），改写它是为了把真值带过去：伤害公式到处是「× 百分比 / 100」，
+            乘法溢出后如果还用被钉住的 2147483647 去除，结果就成了 21474836；用真值除，多数时候能回到范围内、得到精确值。
+            除以 0 和原来一样抛 DivideByZeroException。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.Neg(System.Int32)">
+            <summary>取负（ModifyHp(-damage) 这类）：真值跟着变号，被钉住的数从一个边界翻到另一个边界。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.FromDouble(System.Double)">
+            <summary>(int)x 的饱和版：向零截断；NaN → 0。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.ToSingle(System.Int32)">
+            <summary>
+            (float)x：被钉住的数用真值转。公式里常见「整数乘完转浮点、除以 100 再取整」（剑意增加 x% 之类），
+            不带真值的话 2147483647 / 100 会得到两千一百万。float 只有 7 位有效数字，游戏自己在范围内也是这个精度。
+            </summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.ToDouble(System.Int32)">
+            <summary>(double)x：同 <see cref="M:Yx.ModSdk.Hooks.SatMath.ToSingle(System.Int32)"/>。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.FloorToInt(System.Single)">
+            <summary>Mathf.FloorToInt 的饱和版。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.CeilToInt(System.Single)">
+            <summary>Mathf.CeilToInt 的饱和版。</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Hooks.SatMath.RoundToInt(System.Single)">
+            <summary>Mathf.RoundToInt 的饱和版（同样是银行家舍入）。</summary>
+        </member>
+    </members>
+</doc>

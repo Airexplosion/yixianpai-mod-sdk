@@ -1,0 +1,11 @@
+{
+  "id": "com.yx.hello",
+  "name": "Hello 示例",
+  "version": "1.0.0",
+  "author": "yxp",
+  "description": "SDK 示例与实机冒烟测试用 mod：日志、配置、热键、服务、事件、主线程任务、Toast。",
+  "sdkVersion": ">=1.0.0 <2.0.0",
+  "entry": "plugins/Hello.dll",
+  "entryType": "YxHello.HelloMod",
+  "provides": { "hotkeys": ["F8"] }
+}

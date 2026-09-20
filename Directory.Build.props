@@ -1,0 +1,20 @@
+<Project>
+  <!--
+    自包含构建配置：把 SDK DLL 目录和游戏引用目录用相对路径钉死在仓库根，
+    fork 下来零环境变量即可 `dotnet build`。
+
+    · YxSdkDir → 仓库自带的 sdk/（net40 给 mod 工程、netstandard2.0 给测试工程）。
+    · YxRefs   → refs/：游戏 / Unity 的引用 DLL，是厂商版权，不随仓库分发，
+      由你自己跑 yx-patch refs 从本机游戏生成（命令见根目录 README）。
+      已被 .gitignore 挡住，永远不要提交。没有 refs/ 时按「纯 Core」构建。
+
+    两个都可以用环境变量 YX_SDK_DIR / YX_REFS 覆盖。
+  -->
+  <PropertyGroup>
+    <YxSdkDir Condition="'$(YX_SDK_DIR)' != ''">$([MSBuild]::EnsureTrailingSlash('$(YX_SDK_DIR)'))</YxSdkDir>
+    <YxSdkDir Condition="'$(YxSdkDir)' == ''">$(MSBuildThisFileDirectory)sdk\</YxSdkDir>
+    <YxRefs Condition="'$(YX_REFS)' != ''">$([MSBuild]::EnsureTrailingSlash('$(YX_REFS)'))</YxRefs>
+    <YxRefs Condition="'$(YxRefs)' == ''">$(MSBuildThisFileDirectory)refs\</YxRefs>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

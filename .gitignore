@@ -1,0 +1,14 @@
+# 游戏 / Unity 的引用 DLL —— 厂商版权，从你自己安装的游戏生成，永远不要提交
+refs/
+
+# 构建产物
+**/bin/
+**/obj/
+**/plugins/*.dll
+**/plugins/*.pdb
+dist/
+
+# IDE / 杂项
+.vs/
+*.user
+*.suo
