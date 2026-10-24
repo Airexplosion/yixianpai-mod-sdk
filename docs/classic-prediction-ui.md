@@ -33,6 +33,8 @@ mod工程同时引用Core、ModSdk、ClassicUi，主线程中创建窗口和行�
 
 ## 旧版角色下注条
 
-`NativePredictionBar`保留旧版角色下注条的暗色内衬、马牌图文、名次加减、独立倍率、“投/分”输入、下注/退半/清仓、持仓、总览和折叠。去掉用户明确不要的走势入口，其他控件沿用旧坐标，条宽940、高66。深色Backing是独立不透明节点，不会被原生白纸Window贴图覆盖；收起时隐藏实际子节点和点击区域。
+`NativePredictionBar`保留旧版角色下注条的暗色内衬、马牌图文、名次加减、独立倍率、“投/分”输入、下注/退半/清仓、持仓、总览和折叠。去掉用户明确不要的走势入口，其他控件沿用旧坐标，条宽990、高66（收起按钮加宽为76）。深色Backing是独立不透明节点，不会被原生白纸Window贴图覆盖；收起时隐藏实际子节点和点击区域。
 
 构造参数依次为ctx、theme、minus、plus、buy、half、sell、overview、collapse回调；通过Root/Badge/BadgeText/PlayerName/Rank/Rate/Stake/Buy/Half/Sell/Holding等句柄更新数据。输入初始化10，但刷新时不得重复SetText；目标房间/玩家变化时可由业务层重置。SetCollapsed仅控制视觉，不提交操作。Destroy销毁下注条，图标Sprite仍由调用者管理。示例已包含窗体及下注条。
+
+收起按钮使用“收起 / 展开”文字，不再使用游戏字体可能缺失的下拉符号。此变更不改变回调和折叠子控件行为。
