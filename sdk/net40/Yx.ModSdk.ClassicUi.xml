@@ -13,6 +13,12 @@
         <member name="M:Yx.ModSdk.Unity.NativePanelTheme.SetSource(UnityEngine.Transform)">
             <summary>Use an already initialized native UI subtree; never opens a game panel.</summary>
         </member>
+        <member name="T:Yx.ModSdk.Unity.NativePredictionBar">
+            <summary>Original character prediction strip with its own dark inset, badge, rank, rate and stake controls.</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.NativePredictionBar.SetCollapsed(System.Boolean)">
+            <summary>Hide content without allowing invisible children to receive clicks. Existing field values remain intact.</summary>
+        </member>
         <member name="T:Yx.ModSdk.Unity.NativePredictionRow">
             <summary>Classic seven-column prediction row. Rendering only; caller owns all data and actions.</summary>
         </member>

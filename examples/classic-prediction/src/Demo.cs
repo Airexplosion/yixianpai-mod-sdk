@@ -10,6 +10,8 @@ namespace ClassicPredictionExample
         NativePanelTheme _theme;
         NativePredictionWindow _window;
         NativePredictionRow _row;
+        NativePredictionBar _bar;
+        bool _collapsed;
         int _rank;
         public override void OnLoad(ModContext ctx)
         {
@@ -18,7 +20,7 @@ namespace ClassicPredictionExample
         }
         void Toggle()
         {
-            if (_window != null) { _window.Root.SetActive(!_window.Root.activeSelf); return; }
+            if (_window != null) { _window.Root.SetActive(!_window.Root.activeSelf); if(_bar!=null)_bar.Root.SetActive(_window.Root.activeSelf); return; }
             Canvas canvas=Ui.FindRootCanvas(); if(canvas==null)return;
             _theme.SetSource(canvas.transform);
             _window=new NativePredictionWindow(Context,_theme,"旧版预测面板示例");
@@ -29,6 +31,10 @@ namespace ClassicPredictionExample
             _row.Rank.text="—";_row.Rate.text="2.95x";_row.Holding.text="未持仓";
             _row.Half.SetActive(false);_row.Sell.SetActive(false);
             _window.Status.text="只展示UI，不修改积分";
+            _bar=new NativePredictionBar(Context,_theme,Minus,Plus,Submit,Half,Sell,Toggle,Collapse);
+            _bar.PlayerName.text="示例玩家";_bar.Badge.gameObject.SetActive(false);_bar.BadgeText.text="中等马";
+            _bar.Rank.text="—";_bar.Rate.text="2.95x";_bar.Holding.text="未持仓";
+            _bar.Half.SetActive(false);_bar.Sell.SetActive(false);
         }
         void Minus(){_rank=_rank<=1?8:_rank-1;ShowRank();}
         void Plus(){_rank=_rank>=8?1:_rank+1;ShowRank();}
@@ -39,9 +45,10 @@ namespace ClassicPredictionExample
             if(!long.TryParse(_row.Stake.Text,out amount)||amount<1||amount>10000){_window.Footer.text="投入须为1至10000整数";return;}
             _window.Footer.text="UI示例收到输入："+amount.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
+        void Collapse(){_collapsed=!_collapsed;if(_bar!=null)_bar.SetCollapsed(_collapsed);}
         void Half(){}
         void Sell(){}
-        public override void OnDisable(){if(_window!=null)_window.Destroy();}
+        public override void OnDisable(){if(_window!=null)_window.Destroy();if(_bar!=null)_bar.Destroy();}
     }
 }
 #endif

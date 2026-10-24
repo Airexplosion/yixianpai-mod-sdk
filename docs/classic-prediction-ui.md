@@ -30,3 +30,9 @@ mod工程同时引用Core、ModSdk、ClassicUi，主线程中创建窗口和行�
 `window.Destroy()`销毁窗口及其所有子控件，图标Sprite/Texture由调用者自己管理。透视只放行主体点击，顶栏继续可用。拖拽只在标题区域开始，避开按钮；位置持久化由MOD自行保存。
 
 模板不完整时使用保底色和游戏字体；这不等于完整原生外观已经验收。源码、附加DLL及示例net40构建0warning/0error，IL静态检查0error/0warning；游戏中字体材质、比例与最终视觉尚待实机验收。未打包Unity/游戏DLL、游戏反编译源码、马图或用户数据。
+
+## 旧版角色下注条
+
+`NativePredictionBar`保留旧版角色下注条的暗色内衬、马牌图文、名次加减、独立倍率、“投/分”输入、下注/退半/清仓、持仓、总览和折叠。去掉用户明确不要的走势入口，其他控件沿用旧坐标，条宽940、高66。深色Backing是独立不透明节点，不会被原生白纸Window贴图覆盖；收起时隐藏实际子节点和点击区域。
+
+构造参数依次为ctx、theme、minus、plus、buy、half、sell、overview、collapse回调；通过Root/Badge/BadgeText/PlayerName/Rank/Rate/Stake/Buy/Half/Sell/Holding等句柄更新数据。输入初始化10，但刷新时不得重复SetText；目标房间/玩家变化时可由业务层重置。SetCollapsed仅控制视觉，不提交操作。Destroy销毁下注条，图标Sprite仍由调用者管理。示例已包含窗体及下注条。
