@@ -42,3 +42,7 @@ tools/yx-patch refs --game "<你的弈仙牌安装目录>" --out refs
 
 本仓库自带的内容（SDK、示例、模板、文档、工具）按 [MIT](LICENSE) 授权。
 游戏 / Unity / 你生成的 `refs/` 不在此列，属各自厂商版权。
+
+## 旧版预测UI组件
+
+窗框、布局、马牌展示、赔率文字和下注控件已独立整理为SDK附加组件。使用[Classic UI说明](docs/classic-prediction-ui.md)及[可编译示例](examples/classic-prediction)，不包含游戏资源或业务计算。

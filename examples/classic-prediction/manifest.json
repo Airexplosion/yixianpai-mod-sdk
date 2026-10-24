@@ -1,0 +1,12 @@
+{
+  "id": "com.yx.example.classicprediction",
+  "name": "旧版预测面板示例",
+  "version": "0.1.0",
+  "author": "Yx SDK",
+  "sdkVersion": ">=1.0.0 <2.0.0",
+  "entry": "plugins/ClassicPredictionExample.dll",
+  "entryType": "ClassicPredictionExample.Demo",
+  "libs": [
+    "plugins/Yx.ModSdk.ClassicUi.dll"
+  ]
+}

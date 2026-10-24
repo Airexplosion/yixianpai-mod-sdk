@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Yx.ModSdk.ClassicUi</name>
+    </assembly>
+    <members>
+        <member name="T:Yx.ModSdk.Unity.NativeControlStyle">
+            <summary>Visual-only reuse of caller-selected native controls. Does not copy listeners or game components.</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.NativeControlStyle.Input(TMPro.TMP_InputField,TMPro.TMP_InputField,System.Int32,System.Single)">
+            <summary>Preserve the input's listeners, selection, caret and current text.</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.NativePanelTheme.SetSource(UnityEngine.Transform)">
+            <summary>Use an already initialized native UI subtree; never opens a game panel.</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.NativePredictionRow">
+            <summary>Classic seven-column prediction row. Rendering only; caller owns all data and actions.</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.NativePredictionRow.SetSlot(System.Int32)">
+            <summary>Move only the row, preserving all control dimensions and callbacks.</summary>
+        </member>
+        <member name="T:Yx.ModSdk.Unity.NativePredictionWindow">
+            <summary>The original prediction shell: native title bar, inner surface, headers and footer. No game/network state.</summary>
+        </member>
+        <member name="M:Yx.ModSdk.Unity.NativePredictionWindow.UpdateDrag">
+            <summary>Poll only on the Unity main thread. Header buttons never initiate a drag.</summary>
+        </member>
+    </members>
+</doc>

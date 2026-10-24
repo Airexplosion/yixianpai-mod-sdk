@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><TargetFramework>net40</TargetFramework><LangVersion>7.3</LangVersion><AssemblyName>ClassicPredictionExample</AssemblyName><EnableDefaultCompileItems>false</EnableDefaultCompileItems><OutputPath>plugins/</OutputPath><AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath><DefineConstants>YX_GAME</DefineConstants></PropertyGroup>
+<ItemGroup>
+<Compile Include="src/*.cs"/>
+<Reference Include="Yx.ModSdk.ClassicUi"><HintPath>../../sdk/net40/Yx.ModSdk.ClassicUi.dll</HintPath><Private>true</Private></Reference>
+<PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net40" Version="1.0.3" PrivateAssets="all"/>
+<Reference Include="Yx.ModSdk.Core"><HintPath>../../sdk/net40/Yx.ModSdk.Core.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="Yx.ModSdk"><HintPath>../../sdk/net40/Yx.ModSdk.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="$(YxRefs)*.dll"><Private>false</Private></Reference>
+</ItemGroup>
+</Project>

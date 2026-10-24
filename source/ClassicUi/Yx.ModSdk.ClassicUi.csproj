@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><TargetFramework>net40</TargetFramework><LangVersion>7.3</LangVersion><AssemblyName>Yx.ModSdk.ClassicUi</AssemblyName><EnableDefaultCompileItems>false</EnableDefaultCompileItems><GenerateDocumentationFile>true</GenerateDocumentationFile><NoWarn>CS1591</NoWarn></PropertyGroup>
+<ItemGroup>
+<Compile Include="../Unity/*.cs"/>
+<PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net40" Version="1.0.3" PrivateAssets="all"/>
+<Reference Include="Yx.ModSdk.Core"><HintPath>../../sdk/net40/Yx.ModSdk.Core.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="Yx.ModSdk"><HintPath>../../sdk/net40/Yx.ModSdk.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="$(YxRefs)*.dll"><Private>false</Private></Reference>
+</ItemGroup>
+</Project>

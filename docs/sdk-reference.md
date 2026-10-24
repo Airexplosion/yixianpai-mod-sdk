@@ -188,3 +188,7 @@ Result<int> round = StateApi.Round();
 if (!round.Ok) { Context.Log.Warn(round.Error); return; }
 Context.Log.Info("round " + round.Value.ToString(CultureInfo.InvariantCulture));
 ```
+
+## 完整旧版预测面板
+
+`Yx.ModSdk.Unity.NativePanelTheme`、`NativePredictionWindow`、`NativePredictionRow`由`Yx.ModSdk.ClassicUi.dll`提供。包含旧个人面板的完整窗体与行结构；由MOD提供马牌Sprite、赔率和交易回调。参见[classic-prediction-ui.md](classic-prediction-ui.md)。
